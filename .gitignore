@@ -199,4 +199,7 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
+# Data folder
+/data/
+
 # End of https://www.toptal.com/developers/gitignore/api/linux,visualstudiocode,python,windows
