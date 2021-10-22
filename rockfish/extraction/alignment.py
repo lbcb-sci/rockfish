@@ -1,6 +1,7 @@
 import mappy
 import numpy as np
 from dataclasses import dataclass
+from pathlib import Path
 
 from typing import *
 
@@ -43,5 +44,5 @@ def align_read(query: str, aligner: mappy.Aligner) -> Optional[AlignmentInfo]:
     return AlignmentInfo(alignment.ctg, alignment.r_st, alignment.r_en, alignment.strand == 1, ref_to_query)
 
 
-def get_aligner(reference_path: str) -> mappy.Aligner:
-    return mappy.Aligner(reference_path, preset='map-ont', best_n=1)
+def get_aligner(reference_path: Path) -> mappy.Aligner:
+    return mappy.Aligner(str(reference_path), preset='map-ont', best_n=1)
