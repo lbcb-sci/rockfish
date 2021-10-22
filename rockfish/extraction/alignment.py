@@ -24,7 +24,7 @@ def align_read(query: str, aligner: mappy.Aligner) -> Optional[AlignmentInfo]:
 
     ref_len = alignment.r_en - alignment.r_st
     cigar = alignment.cigar if alignment.strand == 1 else reversed(alignment.cigar)
-    rpos, qpos = 0, alignment.q_st if alignment.strand == 1 else alignment.q_en
+    rpos, qpos = 0, alignment.q_st if alignment.strand == 1 else len(query) - alignment.q_en
 
     ref_to_query = np.empty((ref_len+1,), dtype=int)
     for l, op in cigar:
