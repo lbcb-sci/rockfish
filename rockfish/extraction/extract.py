@@ -1,36 +1,22 @@
-from ctypes import alignment
-from ont_fast5_api.fast5_interface import get_fast5_file
-from ont_fast5_api.fast5_read import Fast5Read
-from tqdm import tqdm
+import numpy as np
 import mappy
 
-from pathlib import Path
+from dataclasses import dataclass
 import re
-import argparse
 
 from typing import *
 
-from fast5 import get_read_info
-from alignment import get_aligner, align_read
+from fast5 import ReadInfo
+from alignment import AlignmentInfo, align_read
 
 
-def get_files(path: Path, recursive: bool = False) -> List[Path]:
-    if path.is_file():
-        return [path]
-
-    # Finding all input FAST5 files
-    if recursive:
-        files = path.glob('**/*.fast5')
-    else:
-        files = path.glob('*.fast5')
-
-    return list(files)
-
-
-def get_reads(path: Path) -> Iterator[Fast5Read]:
-    with get_fast5_file(str(path), mode='r') as f5:
-        for read in f5.get_reads():
-            yield read
+@dataclass
+class Example:
+    read_id: str
+    ctg: str
+    pos: int
+    signal: np.ndarray
+    bases: str
 
 
 MotifPositions = dict[str, Tuple[Set[int], Set[int]]]
@@ -54,54 +40,50 @@ def build_reference_idx(aligner: mappy.Aligner, motif: str,
     return positions
 
 
-def get_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
+def get_ref_pos(aln_info: AlignmentInfo, ref_positions: MotifPositions, 
+                window: int) -> Iterator[int]:
+    if aln_info.fwd_strand:
+        ctg_pos = ref_positions[aln_info.ctg][0]
+    else:
+        ctg_pos = ref_positions[aln_info.ctg][1]
 
-    parser.add_argument('source', type=Path)
-    parser.add_argument('reference', type=Path)
-    parser.add_argument('dest', type=str)
-
-    parser.add_argument('--motif', type=str, default='CG')
-    parser.add_argument('--idx', type=int, default=0)
-
-    parser.add_argument('-r', '--recursive', action='store_true')
-
-    parser.add_argument('--window', type=int, default=15)
-
-    parser.add_argument('--n_readers', type=int, default=1)
-    parser.add_argument('--n_processors', type=int, default=1)
-    parser.add_argument('--n_writers', type=int, default=1)
-
-    parser.add_argument('--info_file', type=str, default='info.txt')
-
-    parser.add_argument('--read_ids', type=Path, default=None)
-
-    return parser.parse_args()
+    if aln_info.fwd_strand:
+        rng = range(aln_info.r_start + window, aln_info.r_end - window)
+    else:
+        rng = range(aln_info.r_end - 1 - window, aln_info.r_start - 1 + window, -1)
+    for rel, rpos in enumerate(rng, start=window):
+        if rpos in ctg_pos:
+            yield rel, rpos
 
 
-def main(args: argparse.Namespace) -> None:
-    tqdm.write(f'Parsing reference file {args.reference}')
-    aligner = get_aligner(args.reference)
-    ref_positions = build_reference_idx(aligner, args.motif, args.idx)
+def extract_features(read_info: ReadInfo, ref_positions: MotifPositions, 
+                     aligner: mappy.Aligner, window: int) -> Optional[None]:
 
-    tqdm.write(f'Retrieving files from {args.source}, recursive {args.recursive}')
-    files = get_files(args.source, args.recursive)
+    seq_to_sig = read_info.get_seq_to_sig()
+    signal = read_info.get_normalized_signal(end=seq_to_sig[-1]) \
+                        .astype(np.half)
+    query, _ = read_info.get_seq_and_quals()
 
-    count = 0
-    for f in files:
-        for r in get_reads(f):
-            read_info = get_read_info(r)
-            aln_info = align_read(read_info.sequence, aligner)
-            if aln_info is not None:
-                idx = aln_info.ref_to_query[0]
-                print(idx, len(read_info.seq_to_sig), aln_info.fwd_strand)
-                break
-        
+    aln_info = align_read(query, aligner)
+    if aln_info is None:
+        return None
 
-    print(count)
+    ref_seq = aligner.seq(aln_info.ctg, aln_info.r_start, aln_info.r_end)
+    ref_seq = ref_seq if aln_info.fwd_strand else mappy.revcomp(ref_seq)
 
+    examples = []
+    for rel, pos in get_ref_pos(aln_info, ref_positions, window):
+        q_start = aln_info.ref_to_query[rel - window]
+        sig_start = seq_to_sig[q_start]
 
-if __name__ == '__main__':
-    args = get_arguments()
+        # q_end -> Start of the first base after example
+        q_end = aln_info.ref_to_query[rel + window + 1]
+        # sig_end -> Start of the first signal point after example
+        sig_end = seq_to_sig[q_end]
 
-    main(args)
+        example = Example(read_info.read_id, aln_info.ctg, pos, 
+                            signal[sig_start:sig_end], 
+                            ref_seq[rel-window:rel+window+1])
+        examples.append(example)
+
+    return examples
