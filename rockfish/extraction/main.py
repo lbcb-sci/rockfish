@@ -35,25 +35,24 @@ def get_reads(path: Path) -> Generator[Fast5Read, None, None]:
 
 
 def worker_init(aligner_: mappy.Aligner, ref_positions_: MotifPositions,
-                window_: int):
-    global aligner, ref_positions, window
+                window_: int, mapq_filter_: bool):
+    global aligner, ref_positions, window, mapq_filter
 
     aligner = aligner_
     ref_positions = ref_positions_
     window = window_
+    mapq_filter = mapq_filter_
 
 
 def process_worker(path: Path) -> List[Example]:
     all_examples = []
-    for i, read in enumerate(get_reads(path)):
+    for read in get_reads(path):
         read_info = load_read(read)
-        examples = extract_features(read_info, ref_positions, aligner, window)
+        examples = extract_features(read_info, ref_positions, aligner, window,
+                                    mapq_filter)
 
         if examples is not None:
             all_examples.extend(examples)
-
-        if i == 500:
-            break
 
     return all_examples
 
@@ -72,8 +71,8 @@ def main(args: argparse.Namespace) -> None:
     tqdm.write('Sumbitting jobs.')
     with ProcessPoolExecutor(max_workers=args.workers,
                              initializer=worker_init,
-                             initargs=(aligner, ref_positions,
-                                       args.window)) as pool:
+                             initargs=(aligner, ref_positions, args.window,
+                                       args.mapq_filter)) as pool:
         futures = [pool.submit(process_worker, p) for p in files]
 
         with BinaryWriter(args.dest, ref_positions.keys(),
@@ -99,6 +98,7 @@ def get_arguments() -> argparse.Namespace:
     parser.add_argument('-r', '--recursive', action='store_true')
 
     parser.add_argument('--window', type=int, default=15)
+    parser.add_argument('-q', '--mapq_filter', action='store_true')
 
     parser.add_argument('-t', '--workers', type=int, default=1)
 

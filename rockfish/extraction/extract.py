@@ -68,13 +68,14 @@ def get_ref_pos(aln_info: AlignmentInfo, ref_positions: MotifPositions,
 
 
 def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
-                     aligner: mappy.Aligner, window: int) -> List[Example]:
+                     aligner: mappy.Aligner, window: int,
+                     mapq_filter: bool) -> List[Example]:
     seq_to_sig = read_info.get_seq_to_sig()
     signal = read_info.get_normalized_signal(end=seq_to_sig[-1]) \
                         .astype(np.half)
     query, _ = read_info.get_seq_and_quals()
 
-    aln_info = align_read(query, aligner)
+    aln_info = align_read(query, aligner, mapq_filter)
     if aln_info is None:
         return None
 
