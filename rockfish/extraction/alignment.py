@@ -2,6 +2,7 @@ import mappy
 import numpy as np
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 
 from typing import *
 
@@ -15,8 +16,8 @@ class AlignmentInfo:
     ref_to_query: np.ndarray
 
 
-def align_read(query: str, aligner: mappy.Aligner,
-               mapq_filter: bool) -> Optional[AlignmentInfo]:
+def align_read(query: str, aligner: mappy.Aligner, mapq_filter: bool,
+               read_id: str) -> Optional[AlignmentInfo]:
     alignments = list(aligner.map(query))
     if not alignments:
         return None
@@ -44,6 +45,11 @@ def align_read(query: str, aligner: mappy.Aligner,
                 ref_to_query[rpos + i] = qpos
             rpos += l
     ref_to_query[rpos] = qpos  # Add the last one (excluded end)
+
+    if ref_len != rpos:
+        print(
+            f'Warning: Mismatch between reference ({ref_len}) and cigar ({rpos}) length in query: {read_id}',
+            file=sys.stderr)
 
     return AlignmentInfo(alignment.ctg, alignment.r_st, alignment.r_en,
                          alignment.strand == 1, ref_to_query)

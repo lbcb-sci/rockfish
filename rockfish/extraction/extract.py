@@ -75,7 +75,7 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
                         .astype(np.half)
     query, _ = read_info.get_seq_and_quals()
 
-    aln_info = align_read(query, aligner, mapq_filter)
+    aln_info = align_read(query, aligner, mapq_filter, read_info.read_id)
     if aln_info is None:
         return None
 
