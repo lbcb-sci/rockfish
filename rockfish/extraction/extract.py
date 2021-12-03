@@ -16,11 +16,10 @@ class Example:
     ctg: str
     pos: int
     signal: List[float]
-    cigar: List[int]
     bases: str
 
 
-MotifPositions = dict[str, Tuple[Set[int], Set[int]]]
+MotifPositions = Dict[str, Tuple[Set[int], Set[int]]]
 
 
 def build_reference_idx(aligner: mappy.Aligner, motif: str,
@@ -62,14 +61,14 @@ def get_ref_pos(aln_info: AlignmentInfo, ref_positions: MotifPositions,
     else:
         rng = range(aln_info.r_end - 1 - window, aln_info.r_start - 1 + window,
                     -1)
+
     for rel, rpos in enumerate(rng, start=window):
         if rpos in ctg_pos:
             yield rel, rpos
 
 
 def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
-                     aligner: mappy.Aligner, window: int) -> Optional[None]:
-
+                     aligner: mappy.Aligner, window: int) -> List[Example]:
     seq_to_sig = read_info.get_seq_to_sig()
     signal = read_info.get_normalized_signal(end=seq_to_sig[-1]) \
                         .astype(np.half)

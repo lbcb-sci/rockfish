@@ -20,7 +20,8 @@ class ReadInfo:
     block_stride: int
 
     def get_seq_to_sig(self) -> np.ndarray:
-        move_table = np.append(self.move_table, 1)  # Adding for easier indexing
+        move_table = np.append(self.move_table,
+                               1)  # Adding for easier indexing
         return move_table.nonzero()[0] * self.block_stride
 
     def get_seq_and_quals(self) -> Tuple[str, np.np.ndarray]:
