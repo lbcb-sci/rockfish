@@ -16,6 +16,7 @@ class Example:
     ctg: str
     pos: int
     signal: List[float]
+    event_length: List[int]
     bases: str
 
 
@@ -67,6 +68,13 @@ def get_ref_pos(aln_info: AlignmentInfo, ref_positions: MotifPositions,
             yield rel, rpos
 
 
+def get_event_length(position: int, ref_to_query: np.ndarray,
+                     query_to_signal: np.ndarray) -> int:
+    q_st, q_en = ref_to_query[position], ref_to_query[position + 1]
+    s_st, s_en = query_to_signal[q_st], query_to_signal[q_en]
+    return s_en - s_st
+
+
 def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
                      aligner: mappy.Aligner, window: int,
                      mapq_filter: bool) -> List[Example]:
@@ -82,6 +90,9 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
     ref_seq = aligner.seq(aln_info.ctg, aln_info.r_start, aln_info.r_end)
     ref_seq = ref_seq if aln_info.fwd_strand else mappy.revcomp(ref_seq)
 
+    event_len_fn = lambda p: get_event_length(p, aln_info.ref_to_query,
+                                              seq_to_sig)
+
     examples = []
     for rel, pos in get_ref_pos(aln_info, ref_positions, window):
         q_start = aln_info.ref_to_query[rel - window]
@@ -92,8 +103,12 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         # sig_end -> Start of the first signal point after example
         sig_end = seq_to_sig[q_end]
 
+        event_lengts = [
+            event_len_fn(p) for p in range(rel - window, rel + window + 1)
+        ]
+
         example = Example(read_info.read_id, aln_info.ctg, pos,
-                          signal[sig_start:sig_end],
+                          signal[sig_start:sig_end], event_lengts,
                           ref_seq[rel - window:rel + window + 1])
         examples.append(example)
 

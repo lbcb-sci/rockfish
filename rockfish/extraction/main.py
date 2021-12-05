@@ -79,7 +79,7 @@ def main(args: argparse.Namespace) -> None:
                           2 * args.window + 1) as writer:
             writer.write_header()
 
-            for future in tqdm(as_completed(futures)):
+            for future in tqdm(as_completed(futures), total=len(futures)):
                 writer.write_examples(future.result())
 
             writer.write_n_examples()

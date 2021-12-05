@@ -30,10 +30,10 @@ class BinaryWriter:
         ref_id = self.ref_ids[example.ctg]
         n_points = len(example.signal)
 
-        data = struct.pack(f'=36sHIH{n_points}e{self.S}s',
+        data = struct.pack(f'=36sHIH{n_points}e{self.S}H{self.S}s',
                            str.encode(example.read_id), ref_id, example.pos,
                            len(example.signal), *example.signal,
-                           str.encode(example.bases))
+                           *example.event_length, str.encode(example.bases))
 
         self.fd.write(data)
         self.n_examples += 1
