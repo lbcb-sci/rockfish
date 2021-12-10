@@ -62,7 +62,7 @@ def parse_ctgs(fd: BufferedReader) -> List[str]:
     ctgs = []
     for _ in n_ctgs:
         ctg_name_len = int.from_bytes(fd.read(1), byteorder=sys.byteorder)
-        ctg_name = struct.unpack(f'={ctg_name_len}s', fd.read(ctg_name_len))
+        ctg_name = struct.unpack(f'={ctg_name_len}s', fd.read(ctg_name_len))[0]
         ctgs.append(ctg_name.decode())
 
     return ctgs
