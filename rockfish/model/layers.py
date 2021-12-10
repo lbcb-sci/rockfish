@@ -83,9 +83,25 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
+class RockfishEncoder(nn.Module):
+    def __init__(self, embed_dim: int, aln_dim: int, nhead: int, dim_ff: int,
+                 n_layers: int, dropout: float) -> None:
+        self.blocks = nn.ModuleList([
+            RockfishLayer(embed_dim, aln_dim, nhead, dim_ff, dropout)
+            for _ in range(n_layers)
+        ])
+
+    def forward(self, signal: Tensor, bases: Tensor, alignment: Tensor,
+                mask: Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]:
+        for block in self.blocks:
+            signal, bases, alignment = block(signal, bases, alignment, mask)
+
+        return signal, bases, alignment
+
+
 class RockfishLayer(nn.Module):
     def __init__(self, embed_dim: int, aln_dim: int, nhead: int, dim_ff: int,
-                 dropout: int):
+                 dropout: float):
         self.signal_attn = nn.TransformerEncoderLayer(embed_dim,
                                                       nhead,
                                                       dim_ff,
@@ -104,10 +120,9 @@ class RockfishLayer(nn.Module):
         self.aln_block = AlignmentBlock(embed_dim, aln_dim)
 
     def forward(
-            self, signal: Tensor, padding_mask: Tensor, bases: Tensor,
-            aln: Tensor,
+            self, signal: Tensor, bases: Tensor, aln: Tensor,
             signal_mask: Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]:
-        signal = self.signal_attn(signal, src_key_padding_mask=padding_mask)
+        signal = self.signal_attn(signal, src_key_padding_mask=signal_mask)
         bases = self.base_attn(bases, signal, aln, signal_mask)
         aln = self.aln_block(signal, bases, aln, signal_mask)
 
