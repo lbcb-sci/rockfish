@@ -64,7 +64,7 @@ class RFDecoderLayer(nn.Module):
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, dropout=0.1, max_len=31):
+    def __init__(self, d_model, dropout=0.1, max_len=128):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
 
@@ -79,7 +79,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe)
 
     def forward(self, x):
-        x = x + self.pe[:x.size(0), :]
+        x = x + self.pe[:x.size(1), :]  # BxSxF + SxF
         return self.dropout(x)
 
 
@@ -117,14 +117,14 @@ class RockfishLayer(nn.Module):
                                         dropout,
                                         activation=F.gelu)
 
-        self.aln_block = AlignmentBlock(embed_dim, aln_dim)
+        # self.aln_block = AlignmentBlock(embed_dim, aln_dim)
 
     def forward(
             self, signal: Tensor, bases: Tensor, aln: Tensor,
             signal_mask: Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]:
         signal = self.signal_attn(signal, src_key_padding_mask=signal_mask)
         bases = self.base_attn(bases, signal, aln, signal_mask)
-        aln = self.aln_block(signal, bases, aln, signal_mask)
+        # aln = self.aln_block(signal, bases, aln, signal_mask)
 
         return signal, bases, aln
 
@@ -138,7 +138,7 @@ def scaled_attn(q: Tensor,
     _, _, _, d = q.shape
     q = q / math.sqrt(d)
 
-    attn = torch.matmul(q, k.transpose(2, 1)) + aln  # BxHxTxS
+    attn = torch.matmul(q, k.transpose(2, 1))  # + aln  # BxHxTxS
     if mask is not None:
         attn += mask
 
@@ -169,7 +169,7 @@ class MHAttention(nn.Module):
         self.q_proj = nn.Linear(embedding_dim, embedding_dim, bias=False)
         self.k_proj = nn.Linear(embedding_dim, embedding_dim, bias=False)
         self.v_proj = nn.Linear(embedding_dim, embedding_dim, bias=False)
-        self.aln_proj = nn.Linear(aln_embedding_dim, heads, bias=False)
+        # self.aln_proj = nn.Linear(aln_embedding_dim, heads, bias=False)
         self.out_proj = nn.Linear(embedding_dim, embedding_dim)
 
     def prepare_for_attn(self, layer: nn.Module, x: Tensor) -> Tensor:
@@ -210,12 +210,12 @@ class MHAttention(nn.Module):
             mask = self.prepare_mask(signal_padding_mask, dtype=q.dtype)
         else:
             mask = None
-        aln = self.prepare_alignment(alignment)  # BxHxTxS
+        # aln = self.prepare_alignment(alignment)  # BxHxTxS
 
         # Use dropout if training
         dropout = self.dropout if self.training else 0.0
 
-        output, weights = scaled_attn(q, k, v, mask, aln, dropout)
+        output, weights = scaled_attn(q, k, v, mask, None, dropout)
         output = output.transpose(2, 1).reshape(B, T, E)  # BxHxTxd -> BxTxE
         output = self.out_proj(output)
 

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from io import BufferedReader
 import torch
+from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset, DataLoader, random_split
 import numpy as np
 
@@ -117,6 +118,13 @@ class RFDataset(Dataset):
         return signal, bases, lengths, label
 
 
+def collate_fn(batch):
+    signals, bases, lenghts, labels = zip(*batch)
+    signals = pad_sequence(signals, batch_first=True)  # BxMAX_LEN
+    return signals, torch.tensor(bases), torch.tensor(lenghts), torch.tensor(
+        labels)
+
+
 class RFDataModule(pl.LightningDataModule):
     def __init__(self,
                  train_data: str,
@@ -146,6 +154,7 @@ class RFDataModule(pl.LightningDataModule):
         return DataLoader(self.train_ds,
                           self.train_batch_size,
                           True,
+                          collate_fn=collate_fn,
                           num_workers=4,
                           pin_memory=True,
                           drop_last=True)
@@ -153,5 +162,6 @@ class RFDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(self.val_ds,
                           self.val_batch_size,
+                          collate_fn=collate_fn,
                           num_workers=4,
                           pin_memory=True)

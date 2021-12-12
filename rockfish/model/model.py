@@ -78,12 +78,12 @@ class Rockfish(pl.LightningModule):
         seq_len = signal.size(1)
         padding_mask = self.create_padding_mask(event_length.sum(dim=1),
                                                 seq_len)  # BxS_out
-        alignment = self.create_alignment(event_length, seq_len)  # BxTxS
-        alignment = self.aln_embedding(alignment.unsqueeze(-1))
+        # alignment = self.create_alignment(event_length, seq_len)  # BxTxS
+        # alignment = self.aln_embedding(alignment.unsqueeze(-1))
 
         bases = self.bases_embedding(bases)  # BxT -> BxTxE
 
-        _, bases, _ = self.encoder(signal, bases, alignment, padding_mask)
+        _, bases, _ = self.encoder(signal, bases, None, padding_mask)
         bases = self.layer_norm(bases)
 
         x = bases[:, 12]  # BxE
