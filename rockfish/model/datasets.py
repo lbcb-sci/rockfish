@@ -97,8 +97,9 @@ class RFDataset(Dataset):
 
         self.seq_len = (2 * window) + 1
 
-        self.fd = open(path, 'rb')
-        self.ctgs = parse_ctgs(self.fd)
+        self.path = path
+        self.fd = None
+        self.ctgs = None
 
         self.offsets = read_offsets(f'{path}.idx')
         self.labels = Labels(labels)
@@ -123,6 +124,14 @@ def collate_fn(batch):
     signals = pad_sequence(signals, batch_first=True)  # BxMAX_LEN
     return signals, torch.tensor(bases), torch.tensor(lenghts), torch.tensor(
         labels)
+
+
+def worker_init_fn(worker_id: int) -> None:
+    worker_info = torch.utils.data.get_worker_info()
+    dataset = worker_info.dataset
+
+    dataset.fd = open(dataset.path, 'rb')
+    dataset.ctgs = parse_ctgs(dataset.fd)
 
 
 class RFDataModule(pl.LightningDataModule):
@@ -155,6 +164,7 @@ class RFDataModule(pl.LightningDataModule):
                           self.train_batch_size,
                           True,
                           collate_fn=collate_fn,
+                          worker_init_fn=worker_init_fn,
                           num_workers=4,
                           pin_memory=True,
                           drop_last=True)
@@ -163,5 +173,6 @@ class RFDataModule(pl.LightningDataModule):
         return DataLoader(self.val_ds,
                           self.val_batch_size,
                           collate_fn=collate_fn,
+                          worker_init_fn=worker_init_fn,
                           num_workers=4,
                           pin_memory=True)
