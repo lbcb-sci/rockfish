@@ -86,6 +86,8 @@ class PositionalEncoding(nn.Module):
 class RockfishEncoder(nn.Module):
     def __init__(self, embed_dim: int, aln_dim: int, nhead: int, dim_ff: int,
                  n_layers: int, dropout: float) -> None:
+        super().__init__()
+
         self.blocks = nn.ModuleList([
             RockfishLayer(embed_dim, aln_dim, nhead, dim_ff, dropout)
             for _ in range(n_layers)
@@ -102,6 +104,8 @@ class RockfishEncoder(nn.Module):
 class RockfishLayer(nn.Module):
     def __init__(self, embed_dim: int, aln_dim: int, nhead: int, dim_ff: int,
                  dropout: float):
+        super().__init__()
+
         self.signal_attn = nn.TransformerEncoderLayer(embed_dim,
                                                       nhead,
                                                       dim_ff,

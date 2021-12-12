@@ -61,7 +61,7 @@ def parse_ctgs(fd: BufferedReader) -> List[str]:
 
     n_ctgs = int.from_bytes(fd.read(2), byteorder=sys.byteorder)
     ctgs = []
-    for _ in n_ctgs:
+    for _ in range(n_ctgs):
         ctg_name_len = int.from_bytes(fd.read(1), byteorder=sys.byteorder)
         ctg_name = struct.unpack(f'={ctg_name_len}s', fd.read(ctg_name_len))[0]
         ctgs.append(ctg_name.decode())
@@ -74,7 +74,7 @@ class Example:
     read_id: str
     ctg: int
     pos: int
-    points: List[float]
+    signal: List[float]
     lengths: List[int]
     bases: str
 
@@ -107,10 +107,10 @@ class RFDataset(Dataset):
         return len(self.offsets)
 
     def __getitem__(self, idx):
-        example = read_example(self.fd, self.offsets[idx])
+        example = read_example(self.fd, self.offsets[idx], self.seq_len)
 
         signal = torch.tensor(example.signal)
-        bases = torch.tensor([ENCODING[b] for b in example['kmer'].decode()])
+        bases = torch.tensor([ENCODING[b] for b in example.bases])
         lengths = torch.tensor(example.lengths)
         label = self.labels.get_label(example.read_id, self.ctgs[example.ctg],
                                       example.pos)
