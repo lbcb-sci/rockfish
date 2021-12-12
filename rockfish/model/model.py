@@ -142,7 +142,7 @@ def get_trainer_defaults() -> Dict[str, Any]:
                                        mode='max')
     trainer_defaults['callbacks'] = [model_checkpoint]
 
-    wandb = WandbLogger(project='dna-mod', log_model=True, save_dir='logging')
+    wandb = WandbLogger(project='dna-mod', log_model='all')
     trainer_defaults['logger'] = wandb
 
     return trainer_defaults
