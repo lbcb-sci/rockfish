@@ -50,28 +50,35 @@ class RockfishLayer(nn.Module):
                  dropout: float):
         super().__init__()
 
-        self.signal_attn = nn.TransformerEncoderLayer(embed_dim,
+        self.signal_attn = nn.TransformerDecoderLayer(embed_dim,
                                                       nhead,
                                                       dim_ff,
                                                       dropout,
                                                       activation=F.gelu,
                                                       batch_first=True,
                                                       norm_first=True)
-        self.base_attn = RFDecoderLayer(embed_dim,
-                                        aln_dim,
-                                        nhead,
-                                        dim_ff,
-                                        dropout,
-                                        activation=F.gelu)
+        self.bases_norm = nn.LayerNorm(embed_dim)
+
+        self.base_attn = nn.TransformerDecoderLayer(embed_dim,
+                                                    nhead,
+                                                    dim_ff,
+                                                    dropout,
+                                                    activation=F.gelu,
+                                                    batch_first=True,
+                                                    norm_first=True)
+        self.signal_norm = nn.LayerNorm(embed_dim)
 
         # self.aln_block = AlignmentBlock(embed_dim, aln_dim)
 
     def forward(
             self, signal: Tensor, bases: Tensor, aln: Tensor,
             signal_mask: Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]:
-        signal = self.signal_attn(signal, src_key_padding_mask=signal_mask)
-        bases = self.base_attn(bases, signal, aln, signal_mask)
-        # aln = self.aln_block(signal, bases, aln, signal_mask)
+        signal = self.signal_attn(signal,
+                                  self.bases_norm(bases),
+                                  tgt_key_padding_mask=signal_mask)
+        bases = self.base_attn(bases,
+                               self.signal_norm(signal),
+                               memory_key_padding_mask=signal_mask)
 
         return signal, bases, aln
 

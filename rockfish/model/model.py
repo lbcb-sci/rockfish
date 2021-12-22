@@ -39,19 +39,8 @@ class Rockfish(pl.LightningModule):
 
         self.pe = PositionalEncoding(features, pos_dropout)
 
-        #self.encoder = RockfishEncoder(features, 32, nhead, dim_ff, n_layers,
-        #                               attn_dropout)
-        #self.encoder = RockfishEncoder(features, 32, nhead, dim_ff, n_layers,
-        #                               attn_dropout)
-        self.transformer = nn.Transformer(features,
-                                          nhead,
-                                          n_layers,
-                                          6,
-                                          dim_ff,
-                                          attn_dropout,
-                                          F.gelu,
-                                          batch_first=True,
-                                          norm_first=True)
+        self.encoder = RockfishEncoder(features, 32, nhead, dim_ff, n_layers,
+                                       attn_dropout)
 
         self.layer_norm = nn.LayerNorm(features)
 
@@ -108,11 +97,7 @@ class Rockfish(pl.LightningModule):
 
         # signal, bases, _ = self.encoder(signal, bases, None, None)
         #bases = self.layer_norm(bases)
-        # _, bases, _ = self.encoder(signal, bases, None, padding_mask)
-        bases = self.transformer(signal,
-                                 bases,
-                                 src_key_padding_mask=padding_mask,
-                                 memory_key_padding_mask=padding_mask)
+        _, bases, _ = self.encoder(signal, bases, None, padding_mask)
 
         # x = bases[:, 12]  # BxE
         bases = self.layer_norm(bases)  # BxTxE
@@ -138,11 +123,7 @@ class Rockfish(pl.LightningModule):
 
         # signal, bases, _ = self.encoder(signal, bases, None, None)
         #bases = self.layer_norm(bases)
-        # _, bases, _ = self.encoder(signal, bases, None, padding_mask)
-        bases = self.transformer(signal,
-                                 bases,
-                                 src_key_padding_mask=padding_mask,
-                                 memory_key_padding_mask=padding_mask)
+        _, bases, _ = self.encoder(signal, bases, None, padding_mask)
 
         # x = bases[:, 12]  # BxE
         bases = self.layer_norm(bases)  # BxTxE
