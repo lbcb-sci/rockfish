@@ -242,10 +242,11 @@ class RockfishDecoderLayerTemp(nn.Module):
                                                num_heads,
                                                dropout,
                                                batch_first=True)
-        self.self_do = nn.Dropout(embed_dim)
+        self.self_do = nn.Dropout(dropout)
 
         self.mha_norm = nn.LayerNorm(embed_dim)
         self.rf_attn = MHAttention(embed_dim, num_heads, aln_dim, dropout)
+        self.mha_do = nn.Dropout(dropout)
 
         self.linear_norm = nn.LayerNorm(embed_dim)
         self.linear = LinearProjection(embed_dim, dim_ff, dropout)
@@ -287,4 +288,4 @@ class RockfishDecoderLayerTemp(nn.Module):
                          alignment,
                          need_weight=False)[0]
 
-        return self.dropout2(x)
+        return self.mha_do(x)
