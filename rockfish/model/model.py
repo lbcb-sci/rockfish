@@ -35,7 +35,6 @@ class Rockfish(pl.LightningModule):
         # self.aln_embedding = nn.Linear(1, 32)
         self.signal_embedding = nn.Linear(5, features)
         self.base_embedding = nn.Embedding(5, features, max_norm=1)
-        self.norm_in = nn.LayerNorm(features)
 
         self.pe = PositionalEncoding(features, pos_dropout)
 
