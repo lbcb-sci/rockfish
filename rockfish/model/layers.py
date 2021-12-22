@@ -46,26 +46,20 @@ class RockfishEncoder(nn.Module):
 
 
 class RockfishLayer(nn.Module):
-    def __init__(self, embed_dim: int, aln_dim: int, nhead: int, dim_ff: int,
-                 dropout: float):
+    def __init__(self,
+                 embed_dim: int,
+                 aln_dim: int,
+                 nhead: int,
+                 dim_ff: int,
+                 dropout: float = 0.0):
         super().__init__()
 
-        self.signal_attn = nn.TransformerDecoderLayer(embed_dim,
-                                                      nhead,
-                                                      dim_ff,
-                                                      dropout,
-                                                      activation=F.gelu,
-                                                      batch_first=True,
-                                                      norm_first=True)
+        self.signal_attn = RockfishDecoderLayerTemp(embed_dim, nhead, dim_ff,
+                                                    aln_dim, dropout)
         self.bases_norm = nn.LayerNorm(embed_dim)
 
-        self.base_attn = nn.TransformerDecoderLayer(embed_dim,
-                                                    nhead,
-                                                    dim_ff,
-                                                    dropout,
-                                                    activation=F.gelu,
-                                                    batch_first=True,
-                                                    norm_first=True)
+        self.base_attn = RockfishDecoderLayerTemp(embed_dim, nhead, dim_ff,
+                                                  aln_dim, dropout)
         self.signal_norm = nn.LayerNorm(embed_dim)
 
         # self.aln_block = AlignmentBlock(embed_dim, aln_dim)
@@ -73,12 +67,15 @@ class RockfishLayer(nn.Module):
     def forward(
             self, signal: Tensor, bases: Tensor, aln: Tensor,
             signal_mask: Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]:
-        signal = self.signal_attn(signal,
-                                  self.bases_norm(bases),
-                                  tgt_key_padding_mask=signal_mask)
-        bases = self.base_attn(bases,
-                               self.signal_norm(signal),
-                               memory_key_padding_mask=signal_mask)
+
+        signal = self.signal_attn.forward(signal,
+                                          self.bases_norm(bases),
+                                          None,
+                                          tgt_key_padding_mask=signal_mask)
+        bases = self.base_attn.forward(bases,
+                                       self.signal_norm(signal),
+                                       None,
+                                       memory_key_padding_mask=signal_mask)
 
         return signal, bases, aln
 
@@ -148,20 +145,21 @@ class MHAttention(nn.Module):
         return aln
 
     def forward(self,
-                signal: Tensor,
-                bases: Tensor,
-                signal_padding_mask: Tensor,
+                query: Tensor,
+                key: Tensor,
+                value: Tensor,
+                key_padding_mask: Tensor,
                 alignment: Tensor,
                 need_weight: bool = False):
-        B, T, E = bases.shape
+        B, T, E = query.shape
 
-        q = self.prepare_for_attn(self.q_proj, bases)  # BxHxTxd
-        k = self.prepare_for_attn(self.k_proj, signal)  # BxHxSxd
-        v = self.prepare_for_attn(self.v_proj, signal)  # BxHxSxd
+        q = self.prepare_for_attn(self.q_proj, query)  # BxHxTxd
+        k = self.prepare_for_attn(self.k_proj, key)  # BxHxSxd
+        v = self.prepare_for_attn(self.v_proj, value)  # BxHxSxd
 
         # BxHx1xS
-        if signal_padding_mask is not None:
-            mask = self.prepare_mask(signal_padding_mask, dtype=q.dtype)
+        if key_padding_mask is not None:
+            mask = self.prepare_mask(key_padding_mask, dtype=q.dtype)
         else:
             mask = None
         # aln = self.prepare_alignment(alignment)  # BxHxTxS
@@ -214,58 +212,79 @@ class AlignmentBlock(nn.Module):
         return aln + out
 
 
-class RFDecoderLayer(nn.Module):
+class LinearProjection(nn.Module):
     def __init__(self,
-                 d_model,
-                 d_aln,
-                 nhead,
-                 dim_feedforward=2048,
-                 dropout=0.1,
-                 activation=F.gelu,
-                 layer_norm_eps=1e-5,
-                 device=None,
-                 dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
-        super(RFDecoderLayer, self).__init__()
+                 embed_dim: int,
+                 dim_ff: int,
+                 dropout: float = 0.0) -> None:
+        super().__init__()
 
-        self.mha = MHAttention(d_model, nhead, d_aln, dropout)
+        self.layers = nn.Sequential(nn.Linear(embed_dim, dim_ff), nn.GELU(),
+                                    nn.Dropout(dropout),
+                                    nn.Linear(dim_ff, embed_dim),
+                                    nn.Dropout(dropout))
 
-        # Implementation of Feedforward model
-        self.activation = activation
-        self.linear1 = nn.Linear(d_model, dim_feedforward, **factory_kwargs)
-        self.dropout = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(dim_feedforward, d_model, **factory_kwargs)
+    def forward(self, x: Tensor) -> Tensor:
+        return self.layers(x)
 
-        self.norm2 = nn.LayerNorm(d_model,
-                                  eps=layer_norm_eps,
-                                  **factory_kwargs)
-        self.norm3 = nn.LayerNorm(d_model,
-                                  eps=layer_norm_eps,
-                                  **factory_kwargs)
-        self.dropout2 = nn.Dropout(dropout)
-        self.dropout3 = nn.Dropout(dropout)
 
-    def __setstate__(self, state):
-        if 'activation' not in state:
-            state['activation'] = F.relu
-        super(RFDecoderLayer, self).__setstate__(state)
+class RockfishDecoderLayerTemp(nn.Module):
+    def __init__(self,
+                 embed_dim: int,
+                 num_heads: int,
+                 dim_ff: int,
+                 aln_dim: int,
+                 dropout: float = 0.0) -> None:
+        super().__init__()
+
+        self.self_norm = nn.LayerNorm(embed_dim)
+        self.self_attn = nn.MultiheadAttention(embed_dim,
+                                               num_heads,
+                                               dropout,
+                                               batch_first=True)
+        self.self_do = nn.Dropout(embed_dim)
+
+        self.mha_norm = nn.LayerNorm(embed_dim)
+        self.rf_attn = MHAttention(embed_dim, num_heads, aln_dim, dropout)
+
+        self.linear_norm = nn.LayerNorm(embed_dim)
+        self.linear = LinearProjection(embed_dim, dim_ff, dropout)
 
     def forward(self,
-                bases: Tensor,
-                signal: Tensor,
-                alignment: Tensor,
-                signal_mask: Optional[Tensor] = None) -> Tensor:
-        x = bases
-        x = x + self.dropout2(
-            self.mha(signal,
-                     self.norm2(bases),
-                     signal_mask,
-                     alignment,
-                     need_weight=False)[0])
-        x = x + self._ff_block(self.norm3(x))
+                tgt: Tensor,
+                memory: Tensor,
+                aln: Tensor,
+                tgt_mask: Optional[Tensor] = None,
+                memory_mask: Optional[Tensor] = None,
+                tgt_key_padding_mask: Optional[Tensor] = None,
+                memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+        x = tgt
+
+        x = x + self._sa_block(self.self_norm(x), tgt_mask,
+                               tgt_key_padding_mask)
+        x = x + self._mha_block(self.mha_norm(x), memory, aln,
+                                memory_key_padding_mask)
+        x = x + self.linear(self.linear_norm(x))
 
         return x
 
-    def _ff_block(self, x: Tensor) -> Tensor:
-        x = self.linear2(self.dropout(self.activation(self.linear1(x))))
-        return self.dropout3(x)
+    def _sa_block(self, x: Tensor, attn_mask: Optional[Tensor],
+                  key_padding_mask: Optional[Tensor]) -> Tensor:
+        x = self.self_attn(x,
+                           x,
+                           x,
+                           attn_mask=attn_mask,
+                           key_padding_mask=key_padding_mask,
+                           need_weights=False)[0]
+        return self.self_do(x)
+
+    def _mha_block(self, x: Tensor, mem: Tensor, alignment: Optional[Tensor],
+                   key_padding_mask: Optional[Tensor]) -> Tensor:
+        x = self.rf_attn(x,
+                         mem,
+                         mem,
+                         key_padding_mask,
+                         alignment,
+                         need_weight=False)[0]
+
+        return self.dropout2(x)
