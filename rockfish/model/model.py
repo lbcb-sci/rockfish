@@ -29,17 +29,16 @@ class Rockfish(pl.LightningModule):
                  mask_prob: float = 0.15) -> None:
         super(Rockfish, self).__init__()
         self.save_hyperparameters()
+        self.aln_dim = nhead * 4
 
-        #self.conv_enc = nn.Conv1d(1, features, kernel_size=19, stride=5)
-        #self.conv_norm = nn.LayerNorm(features)
-        # self.aln_embedding = nn.Linear(1, 32)
         self.signal_embedding = nn.Linear(5, features)
-        self.base_embedding = nn.Embedding(5, features, max_norm=1)
+        self.base_embedding = nn.Embedding(5, features)  # removed max_norm=1
+        self.aln_embedding = nn.Linear(1, self.aln_dim)
 
         self.pe = PositionalEncoding(features, pos_dropout)
 
-        self.encoder = RockfishEncoder(features, 32, nhead, dim_ff, n_layers,
-                                       attn_dropout)
+        self.encoder = RockfishEncoder(features, self.aln_dim, nhead, dim_ff,
+                                       n_layers, attn_dropout)
 
         self.layer_norm = nn.LayerNorm(features)
 
@@ -62,17 +61,21 @@ class Rockfish(pl.LightningModule):
 
         return repeats >= lengths.unsqueeze(-1)
 
-    def create_alignment(lengths: torch.Tensor, seq_len: int) -> torch.Tensor:
+    def create_alignment(self, lengths: torch.Tensor,
+                         seq_len: int) -> torch.Tensor:
         B, T = lengths.shape
-        bases_range = torch.range(0, T)
-        sig_range = torch.range(0, seq_len)
+        bases_range = torch.arange(0, T, device=lengths.device)
+        sig_range = torch.arange(0, seq_len, device=lengths.device)
 
         alns = []
         for i in range(B):
-            b_idx = torch.repeat_interleave(bases_range, lengths[i])
+            block_lengths = torch.div(lengths[i], 5, rounding_mode='floor')
+            b_idx = torch.repeat_interleave(bases_range, block_lengths)
 
-            aln = torch.zeros(T, seq_len)
+            aln = torch.zeros(T, seq_len, device=lengths.device)
             aln[b_idx, sig_range[:len(b_idx)]] = 1
+            alns.append(aln)
+
         aln = torch.stack(alns, dim=0)
 
         return aln  # BxTxS
@@ -82,7 +85,6 @@ class Rockfish(pl.LightningModule):
         B, S, _ = signal.shape
 
         signal = self.signal_embedding(signal)  # BxSxE
-        # signal = torch.cat([self.cls.expand(B, -1, -1), signal], dim=1)
         signal = self.pe(signal)
 
         padding_mask = self.create_padding_mask(event_length.sum(dim=1),
@@ -91,16 +93,14 @@ class Rockfish(pl.LightningModule):
         bases = self.base_embedding(bases)
         bases = self.pe(bases)
 
-        # alignment = self.create_alignment(event_length, seq_len)  # BxTxS
-        # alignment = self.aln_embedding(alignment.unsqueeze(-1))
+        alignment = self.create_alignment(event_length, S)  # BxTxS
+        alignment = self.aln_embedding(alignment.unsqueeze(-1))
 
-        # signal, bases, _ = self.encoder(signal, bases, None, None)
-        #bases = self.layer_norm(bases)
-        _, bases, _ = self.encoder(signal, bases, None, padding_mask)
+        _, bases, _ = self.encoder(signal, bases, alignment, padding_mask)
 
-        # x = bases[:, 12]  # BxE
         bases = self.layer_norm(bases)  # BxTxE
         x = bases[:, 12]
+
         return self.fc_mod(x).squeeze(-1)  # BxE -> B
 
     def forward_train(self, signal, event_length, bases, bases_mask=None):
@@ -108,7 +108,6 @@ class Rockfish(pl.LightningModule):
         B, S, _ = signal.shape
 
         signal = self.signal_embedding(signal)  # BxSxE
-        # signal = torch.cat([self.cls.expand(B, -1, -1), signal], dim=1)
         signal = self.pe(signal)
 
         padding_mask = self.create_padding_mask(event_length.sum(dim=1),
@@ -117,14 +116,11 @@ class Rockfish(pl.LightningModule):
         bases = self.base_embedding(bases)
         bases = self.pe(bases)
 
-        # alignment = self.create_alignment(event_length, seq_len)  # BxTxS
-        # alignment = self.aln_embedding(alignment.unsqueeze(-1))
+        alignment = self.create_alignment(event_length, S)  # BxTxS
+        alignment = self.aln_embedding(alignment.unsqueeze(-1))
 
-        # signal, bases, _ = self.encoder(signal, bases, None, None)
-        #bases = self.layer_norm(bases)
-        _, bases, _ = self.encoder(signal, bases, None, padding_mask)
+        _, bases, _ = self.encoder(signal, bases, alignment, padding_mask)
 
-        # x = bases[:, 12]  # BxE
         bases = self.layer_norm(bases)  # BxTxE
         x = bases[:, 12]
         mod_logits = self.fc_mod(x).squeeze(-1)  # BxE -> B
@@ -194,7 +190,7 @@ def get_trainer_defaults() -> Dict[str, Any]:
                                        mode='max')
     trainer_defaults['callbacks'] = [model_checkpoint]
 
-    wandb = WandbLogger(project='dna-mod', log_model='all', save_dir='wandb')
+    wandb = WandbLogger(project='dna-mod', log_model=True, save_dir='wandb')
     trainer_defaults['logger'] = wandb
 
     return trainer_defaults
