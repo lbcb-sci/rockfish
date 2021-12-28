@@ -49,12 +49,12 @@ class AlignmentNorm(nn.Module):
     def __init__(self, aln_dim: int) -> None:
         super().__init__()
 
-        self.norm = nn.InstanceNorm2d(aln_dim)
+        self.norm = nn.LayerNorm(25)
 
     def forward(self, aln: Tensor) -> Tensor:
-        aln = aln.permute(0, 3, 1, 2)  # BxTxSxE -> BxExTxS
+        aln = aln.transpose(3, 1)  # BxTxSxE -> BxExSxT
         aln = self.norm(aln)
-        aln = aln.permute(0, 2, 3, 1)  # BxExTxS -> BxTxSxE
+        aln = aln.transpose(3, 1)  # BxExSxT -> BxTxSxE
 
         return aln
 
