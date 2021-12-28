@@ -45,6 +45,20 @@ class RockfishEncoder(nn.Module):
         return signal, bases, alignment
 
 
+class AlignmentNorm(nn.Module):
+    def __init__(self, aln_dim: int) -> None:
+        super().__init__()
+
+        self.norm = nn.InstanceNorm2d(aln_dim)
+
+    def forward(self, aln: Tensor) -> Tensor:
+        aln = aln.permute(0, 3, 1, 2)  # BxTxSxE -> BxExTxS
+        aln = self.norm(aln)
+        aln = aln.permute(0, 2, 3, 1)  # BxExTxS -> BxTxSxE
+
+        return aln
+
+
 class RockfishLayer(nn.Module):
     def __init__(self,
                  embed_dim: int,
@@ -61,21 +75,25 @@ class RockfishLayer(nn.Module):
         self.base_attn = RockfishDecoderLayerTemp(embed_dim, nhead, dim_ff,
                                                   aln_dim, dropout)
         self.signal_norm = nn.LayerNorm(embed_dim)
+        self.aln_norm = AlignmentNorm(aln_dim)
 
-        # self.aln_block = AlignmentBlock(embed_dim, aln_dim)
+        self.aln_block = AlignmentBlock(embed_dim, aln_dim)
 
     def forward(
             self, signal: Tensor, bases: Tensor, aln: Tensor,
             signal_mask: Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]:
 
-        signal = self.signal_attn.forward(signal,
-                                          self.bases_norm(bases),
-                                          None,
-                                          tgt_key_padding_mask=signal_mask)
-        bases = self.base_attn.forward(bases,
-                                       self.signal_norm(signal),
-                                       None,
-                                       memory_key_padding_mask=signal_mask)
+        signal = self.signal_attn(signal,
+                                  self.bases_norm(bases),
+                                  None,
+                                  tgt_key_padding_mask=signal_mask)
+
+        bases = self.base_attn(bases,
+                               self.signal_norm(signal),
+                               self.aln_norm(aln),
+                               memory_key_padding_mask=signal_mask)
+
+        aln = self.aln_block(signal, bases, aln, signal_mask)
 
         return signal, bases, aln
 
@@ -90,6 +108,8 @@ def scaled_attn(q: Tensor,
     q = q / math.sqrt(d)
 
     attn = torch.matmul(q, k.transpose(3, 2))  # + aln  # BxHxTxS
+    if aln is not None:
+        attn += aln
     if mask is not None:
         attn += mask
 
@@ -120,7 +140,7 @@ class MHAttention(nn.Module):
         self.q_proj = nn.Linear(embedding_dim, embedding_dim, bias=False)
         self.k_proj = nn.Linear(embedding_dim, embedding_dim, bias=False)
         self.v_proj = nn.Linear(embedding_dim, embedding_dim, bias=False)
-        # self.aln_proj = nn.Linear(aln_embedding_dim, heads, bias=False)
+        self.aln_proj = nn.Linear(aln_embedding_dim, heads, bias=False)
         self.out_proj = nn.Linear(embedding_dim, embedding_dim)
 
     def prepare_for_attn(self, layer: nn.Module, x: Tensor) -> Tensor:
@@ -140,7 +160,7 @@ class MHAttention(nn.Module):
         return mask  # BxHx1xS
 
     def prepare_alignment(self, alignment: Tensor) -> Tensor:
-        aln = self.aln_proj(alignment)  # BxTxSxH
+        aln = self.aln_proj(alignment)  # BxTxSxE -> BxTxSxH
         aln = aln.permute(0, 3, 1, 2)  # BxHxTxS
         return aln
 
@@ -149,7 +169,7 @@ class MHAttention(nn.Module):
                 key: Tensor,
                 value: Tensor,
                 key_padding_mask: Tensor,
-                alignment: Tensor,
+                aln: Tensor,
                 need_weight: bool = False):
         B, T, E = query.shape
 
@@ -162,12 +182,13 @@ class MHAttention(nn.Module):
             mask = self.prepare_mask(key_padding_mask, dtype=q.dtype)
         else:
             mask = None
-        # aln = self.prepare_alignment(alignment)  # BxHxTxS
+        if aln is not None:
+            aln = self.prepare_alignment(aln)  # BxHxTxS
 
         # Use dropout if training
         dropout = self.dropout if self.training else 0.0
 
-        output, weights = scaled_attn(q, k, v, mask, None, dropout)
+        output, weights = scaled_attn(q, k, v, mask, aln, dropout)
         output = output.transpose(2, 1).reshape(B, T, E)  # BxHxTxd -> BxTxE
         output = self.out_proj(output)
 
