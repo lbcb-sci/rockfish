@@ -310,3 +310,19 @@ class RockfishDecoderLayerTemp(nn.Module):
                          need_weight=False)[0]
 
         return self.mha_do(x)
+
+
+class PositionAwarePooling(nn.Module):
+    def __init__(self, seq_len: int, embed_dim: int) -> None:
+        super().__init__()
+
+        tensor = torch.zeros(seq_len, embed_dim)
+        tensor[seq_len // 2] = 1
+        self.scores = nn.parameter.Parameter(tensor, requires_grad=True)
+
+    def forward(self, x: Tensor) -> Tensor:
+        scores = self.scores.softmax(
+            dim=0)  # Normalize over timesteps for each feature
+        output = (scores * x).sum(dim=1)  # BxTxF->BxF
+
+        return output

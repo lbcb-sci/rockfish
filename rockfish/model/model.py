@@ -11,7 +11,7 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.utilities.cli import LightningCLI
 
 from datasets import RFDataModule
-from layers import PositionalEncoding, RockfishEncoder
+from layers import PositionalEncoding, RockfishEncoder, PositionAwarePooling
 
 from typing import *
 
@@ -41,6 +41,7 @@ class Rockfish(pl.LightningModule):
                                        n_layers, attn_dropout)
 
         self.layer_norm = nn.LayerNorm(features)
+        self.pooling = PositionAwarePooling(25, features)
 
         self.fc_mod = nn.Linear(features, 1)
         self.fc_mask = nn.Linear(features, 4)
@@ -99,7 +100,8 @@ class Rockfish(pl.LightningModule):
         _, bases, _ = self.encoder(signal, bases, alignment, padding_mask)
 
         bases = self.layer_norm(bases)  # BxTxE
-        x = bases[:, 12]
+        # x = bases[:, 12]
+        x = self.pooling(bases)  # BxTxF->BxF
 
         return self.fc_mod(x).squeeze(-1)  # BxE -> B
 
@@ -122,7 +124,8 @@ class Rockfish(pl.LightningModule):
         _, bases, _ = self.encoder(signal, bases, alignment, padding_mask)
 
         bases = self.layer_norm(bases)  # BxTxE
-        x = bases[:, 12]
+        #x = bases[:, 12]
+        x = self.pooling(bases)
         mod_logits = self.fc_mod(x).squeeze(-1)  # BxE -> B
 
         if bases_mask is None:
