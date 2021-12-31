@@ -69,18 +69,18 @@ class RockfishLayer(nn.Module):
         super().__init__()
 
         self.signal_attn = RockfishDecoderLayerTemp(embed_dim, nhead, dim_ff,
-                                                    aln_dim, dropout)
+                                                    None, dropout)
         self.bases_norm = nn.LayerNorm(embed_dim)
 
         self.base_attn = RockfishDecoderLayerTemp(embed_dim, nhead, dim_ff,
-                                                  aln_dim, dropout)
+                                                  None, dropout)
         self.signal_norm = nn.LayerNorm(embed_dim)
-        self.aln_norm = AlignmentNorm(aln_dim)
 
-        self.aln_block = AlignmentBlock(embed_dim, aln_dim)
+        # self.aln_norm = AlignmentNorm(aln_dim)
+        # self.aln_block = AlignmentBlock(embed_dim, aln_dim)
 
     def forward(
-            self, signal: Tensor, bases: Tensor, aln: Tensor,
+            self, signal: Tensor, bases: Tensor, aln: Optional[Tensor],
             signal_mask: Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]:
 
         signal = self.signal_attn(signal,
@@ -90,10 +90,11 @@ class RockfishLayer(nn.Module):
 
         bases = self.base_attn(bases,
                                self.signal_norm(signal),
-                               self.aln_norm(aln),
+                               None,
                                memory_key_padding_mask=signal_mask)
 
-        aln = self.aln_block(signal, bases, aln, signal_mask)
+        if aln is not None:
+            aln = self.aln_block(signal, bases, aln, signal_mask)
 
         return signal, bases, aln
 
@@ -125,7 +126,7 @@ class MHAttention(nn.Module):
     def __init__(self,
                  embedding_dim: int,
                  heads: int,
-                 aln_embedding_dim: int,
+                 aln_embedding_dim: Optional[int],
                  dropout: float = 0.0):
         super().__init__()
 
@@ -140,7 +141,10 @@ class MHAttention(nn.Module):
         self.q_proj = nn.Linear(embedding_dim, embedding_dim, bias=False)
         self.k_proj = nn.Linear(embedding_dim, embedding_dim, bias=False)
         self.v_proj = nn.Linear(embedding_dim, embedding_dim, bias=False)
-        self.aln_proj = nn.Linear(aln_embedding_dim, heads, bias=False)
+
+        if aln_embedding_dim is not None:
+            self.aln_proj = nn.Linear(aln_embedding_dim, heads, bias=False)
+
         self.out_proj = nn.Linear(embedding_dim, embedding_dim)
 
     def prepare_for_attn(self, layer: nn.Module, x: Tensor) -> Tensor:
@@ -254,7 +258,7 @@ class RockfishDecoderLayerTemp(nn.Module):
                  embed_dim: int,
                  num_heads: int,
                  dim_ff: int,
-                 aln_dim: int,
+                 aln_dim: Optional[int],
                  dropout: float = 0.0) -> None:
         super().__init__()
 
@@ -326,3 +330,28 @@ class PositionAwarePooling(nn.Module):
         output = (scores * x).sum(dim=1)  # BxTxF->BxF
 
         return output
+
+
+def add_positional_encoding(x: Tensor, event_length: Tensor) -> Tensor:
+    B, S, E = x.shape
+    _, T = event_length.shape
+
+    pe = torch.zeros(B, S, E, device=x.device)
+    signal_position = torch.arange(0, S, dtype=torch.float,
+                                   device=x.device).unsqueeze(1)
+    bases_position = torch.arange(0, T, dtype=torch.float, device=x.device)
+
+    div_term = torch.exp(
+        torch.arange(0, E, 2, device=x.device).float() *
+        (-math.log(10000.0) / E))
+
+    pe[:, :, 1::2] = torch.cos(signal_position * div_term)  # Absolute position
+
+    for i in range(B):  # Alignment position
+        block_lengths = torch.div(event_length[i], 5, rounding_mode='floor')
+        b_idx = torch.repeat_interleave(bases_position,
+                                        block_lengths).unsqueeze(1)
+
+        pe[i, :len(b_idx), 0::2] = torch.cos(b_idx * div_term)
+
+    return x + pe

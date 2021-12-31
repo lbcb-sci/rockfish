@@ -11,7 +11,7 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.utilities.cli import LightningCLI
 
 from datasets import RFDataModule
-from layers import PositionalEncoding, RockfishEncoder, PositionAwarePooling
+from layers import PositionalEncoding, RockfishEncoder, PositionAwarePooling, add_positional_encoding
 
 from typing import *
 
@@ -35,7 +35,8 @@ class Rockfish(pl.LightningModule):
         self.base_embedding = nn.Embedding(5, features)  # removed max_norm=1
         self.aln_embedding = nn.Linear(1, self.aln_dim)
 
-        self.pe = PositionalEncoding(features, pos_dropout)
+        self.embedding_dropout = nn.Dropout(p=pos_dropout)
+        self.pe = PositionalEncoding(25, pos_dropout)
 
         self.encoder = RockfishEncoder(features, self.aln_dim, nhead, dim_ff,
                                        n_layers, attn_dropout)
@@ -86,7 +87,9 @@ class Rockfish(pl.LightningModule):
         B, S, _ = signal.shape
 
         signal = self.signal_embedding(signal)  # BxSxE
-        signal = self.pe(signal)
+        signal = add_positional_encoding(signal, event_length)
+        signal = self.embedding_dropout(signal)
+        # signal = self.pe(signal)
 
         padding_mask = self.create_padding_mask(event_length.sum(dim=1),
                                                 S)  # BxS_out
@@ -94,8 +97,9 @@ class Rockfish(pl.LightningModule):
         bases = self.base_embedding(bases)
         bases = self.pe(bases)
 
-        alignment = self.create_alignment(event_length, S)  # BxTxS
-        alignment = self.aln_embedding(alignment.unsqueeze(-1))
+        #alignment = self.create_alignment(event_length, S)  # BxTxS
+        #alignment = self.aln_embedding(alignment.unsqueeze(-1))
+        alignment = None
 
         _, bases, _ = self.encoder(signal, bases, alignment, padding_mask)
 
@@ -110,7 +114,9 @@ class Rockfish(pl.LightningModule):
         B, S, _ = signal.shape
 
         signal = self.signal_embedding(signal)  # BxSxE
-        signal = self.pe(signal)
+        signal = add_positional_encoding(signal, event_length)
+        signal = self.embedding_dropout(signal)
+        # signal = self.pe(signal)
 
         padding_mask = self.create_padding_mask(event_length.sum(dim=1),
                                                 S)  # BxS_out
@@ -118,8 +124,9 @@ class Rockfish(pl.LightningModule):
         bases = self.base_embedding(bases)
         bases = self.pe(bases)
 
-        alignment = self.create_alignment(event_length, S)  # BxTxS
-        alignment = self.aln_embedding(alignment.unsqueeze(-1))
+        #alignment = self.create_alignment(event_length, S)  # BxTxS
+        #alignment = self.aln_embedding(alignment.unsqueeze(-1))
+        alignment = None
 
         _, bases, _ = self.encoder(signal, bases, alignment, padding_mask)
 
