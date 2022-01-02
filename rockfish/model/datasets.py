@@ -2,8 +2,7 @@ from dataclasses import dataclass
 from io import BufferedReader
 import torch
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import Dataset, DataLoader, random_split
-import numpy as np
+from torch.utils.data import Dataset, DataLoader
 
 import pytorch_lightning as pl
 
@@ -112,21 +111,6 @@ class RFDataset(Dataset):
 
         signal = torch.tensor(example.signal)
         bases = torch.tensor([ENCODING[b] for b in example.bases])
-        '''cumsum = np.cumsum([0] + list(example.lengths))
-        signal = []
-        for i in range(25):
-            l = cumsum[i + 1] - cumsum[i]
-            step = l / 15
-            if l == 0:
-                points = [0.] * 15
-            else:
-                points = [
-                    example.signal[cumsum[i] + int(j * step)]
-                    for j in range(15)
-                ]
-            signal.append(points)
-        signal = torch.tensor(signal)'''
-
         lengths = torch.tensor(example.lengths)
         label = self.labels.get_label(example.read_id, self.ctgs[example.ctg],
                                       example.pos)
