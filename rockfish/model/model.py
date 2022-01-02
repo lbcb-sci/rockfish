@@ -36,7 +36,7 @@ class Rockfish(pl.LightningModule):
         self.aln_embedding = nn.Linear(1, self.aln_dim)
 
         self.embedding_dropout = nn.Dropout(p=pos_dropout)
-        self.pe = PositionalEncoding(25, pos_dropout)
+        self.pe = PositionalEncoding(features, pos_dropout, 25)
 
         self.encoder = RockfishEncoder(features, self.aln_dim, nhead, dim_ff,
                                        n_layers, attn_dropout)
