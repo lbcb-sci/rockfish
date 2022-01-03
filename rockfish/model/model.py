@@ -38,8 +38,8 @@ class Rockfish(pl.LightningModule):
         # self.aln_embedding = nn.Linear(1, self.aln_dim)
 
         # Signal masking
-        self.signal_mask = nn.parameter.Parameter(torch.zeros(features),
-                                                  requires_grad=True)
+        #self.signal_mask = nn.parameter.Parameter(torch.zeros(features),
+        #                                          requires_grad=True)
         self.codebook = nn.Linear(features, codebook_size, bias=False)
 
         self.embedding_dropout = nn.Dropout(p=pos_dropout)
@@ -95,10 +95,11 @@ class Rockfish(pl.LightningModule):
         code_logits, masks = [], []
         for i in range(signal.shape[0]):
             mask = torch.rand(lengths[i]) < self.hparams.signal_mask_prob
+            masks.append(mask)
 
             c_logits = self.codebook(signal[i, :lengths[i]][mask])  # mxK
             code_logits.append(c_logits)
-            signal[i, :lengths[i]][mask] = self.signal_mask
+            signal[i, :lengths[i]][mask] = 0. # self.signal_mask
 
         return torch.cat(code_logits, dim=0), masks
 
@@ -184,12 +185,13 @@ class Rockfish(pl.LightningModule):
     def get_diversity_loss(self, signal_code_logits):
         probs = signal_code_logits.softmax(dim=1)  # MxK
         avg_probs = probs.mean(dim=0)  # K
+        print(avg_probs)
         log_avg_probs = avg_probs.log()
 
         return F.kl_div(
             log_avg_probs,
             torch.tensor([1 / self.hparams.codebook_size] *
-                         self.hparams.codebook_size))
+                         self.hparams.codebook_size, device=log_avg_probs.device), reduction='batchmean')
 
     def training_step(self, batch, batch_idx):
         signal, bases, lengths, y = batch  # BxSx14, BxS, BxS, B
