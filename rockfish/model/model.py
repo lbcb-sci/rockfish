@@ -90,23 +90,22 @@ class Rockfish(pl.LightningModule):
         return aln  # BxTxS
 
     def mask_signal(self, signal, n_points):
-        lengths = torch.div(n_points, 5,
-                            rounding_mode='floor')
+        lengths = torch.div(n_points, 5, rounding_mode='floor')
 
         code_logits, masks = [], []
         for i in range(signal.shape[0]):
             mask = torch.rand(lengths[i]) < self.hparams.signal_mask_prob
 
-            c_logits = self.codebook(signal[i][mask])  # mxK
+            c_logits = self.codebook(signal[i, :lengths[i]][mask])  # mxK
             code_logits.append(c_logits)
-            signal[i][mask] = self.signal_mask
+            signal[i, :lengths[i]][mask] = self.signal_mask
 
         return torch.cat(code_logits, dim=0), masks
 
     def get_context_code_probs(self, signal, masks):
         code_logits = []
         for i, m in enumerate(masks):
-            c_logits = self.codebook(signal[i][m])
+            c_logits = self.codebook(signal[i, :len(m)][m])
             code_logits.append(c_logits)
 
         return torch.cat(code_logits, dim=0)
