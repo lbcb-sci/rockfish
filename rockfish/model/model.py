@@ -99,7 +99,7 @@ class Rockfish(pl.LightningModule):
 
             c_logits = self.codebook(signal[i, :lengths[i]][mask])  # mxK
             code_logits.append(c_logits)
-            signal[i, :lengths[i]][mask] = 0. # self.signal_mask
+            signal[i, :lengths[i]][mask] = 0.  # self.signal_mask
 
         return torch.cat(code_logits, dim=0), masks
 
@@ -185,13 +185,13 @@ class Rockfish(pl.LightningModule):
     def get_diversity_loss(self, signal_code_logits):
         probs = signal_code_logits.softmax(dim=1)  # MxK
         avg_probs = probs.mean(dim=0)  # K
-        print(avg_probs)
         log_avg_probs = avg_probs.log()
 
-        loss = F.kl_div(
-            log_avg_probs,
-            torch.tensor([1 / self.hparams.codebook_size] *
-                         self.hparams.codebook_size, device=log_avg_probs.device), reduction='batchmean')
+        loss = F.kl_div(log_avg_probs,
+                        torch.tensor([1 / self.hparams.codebook_size] *
+                                     self.hparams.codebook_size,
+                                     device=log_avg_probs.device),
+                        reduction='batchmean')
 
         if loss < 0:
             print(avg_probs, loss)
