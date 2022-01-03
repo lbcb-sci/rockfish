@@ -90,9 +90,12 @@ class Rockfish(pl.LightningModule):
         return aln  # BxTxS
 
     def mask_signal(self, signal, n_points):
+        lengths = torch.div(n_points, 5,
+                            rounding_mode='floor')
+
         code_logits, masks = [], []
         for i in range(signal.shape[0]):
-            mask = torch.rand(n_points[i]) < self.hparams.signal_mask_prob
+            mask = torch.rand(lengths[i]) < self.hparams.signal_mask_prob
 
             c_logits = self.codebook(signal[i][mask])  # mxK
             code_logits.append(c_logits)
@@ -193,7 +196,7 @@ class Rockfish(pl.LightningModule):
         signal, bases, lengths, y = batch  # BxSx14, BxS, BxS, B
 
         probs = torch.rand(*bases.shape, device=bases.device)
-        mask = probs < self.hparams.mask_prob
+        mask = probs < self.hparams.bases_mask_prob
         rand_mask = probs < 0.05
 
         target_bases = bases[mask].clone()
