@@ -186,10 +186,15 @@ class Rockfish(pl.LightningModule):
         avg_probs = probs.mean(dim=0)  # K
         log_avg_probs = avg_probs.log()
 
-        return F.kl_div(
+        loss = F.kl_div(
             log_avg_probs,
             torch.tensor([1 / self.hparams.codebook_size] *
                          self.hparams.codebook_size))
+
+        if loss < 0:
+            print(avg_probs, loss)
+
+        return loss
 
     def training_step(self, batch, batch_idx):
         signal, bases, lengths, y = batch  # BxSx14, BxS, BxS, B
