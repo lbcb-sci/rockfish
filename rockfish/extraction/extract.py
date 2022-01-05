@@ -103,6 +103,10 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         # sig_end -> Start of the first signal point after example
         sig_end = seq_to_sig[q_end]
 
+        length = sig_end - sig_start
+        if length < 50 or length > 1200:
+            continue
+
         event_lengts = [
             event_len_fn(p) for p in range(rel - window, rel + window + 1)
         ]

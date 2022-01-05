@@ -7,6 +7,7 @@ import mappy
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import argparse
+import logging
 
 from typing import *
 
@@ -47,17 +48,24 @@ def worker_init(aligner_: mappy.Aligner, ref_positions_: MotifPositions,
 def process_worker(path: Path) -> List[Example]:
     all_examples = []
     for read in get_reads(path):
-        read_info = load_read(read)
-        examples = extract_features(read_info, ref_positions, aligner, window,
-                                    mapq_filter)
+        try:
+            read_info = load_read(read)
+            examples = extract_features(read_info, ref_positions, aligner, window,
+                                        mapq_filter)
 
-        if examples is not None:
-            all_examples.extend(examples)
+            if examples is not None:
+                all_examples.extend(examples)
+            logging.info(f'Successfully generated examples for read: {read_info.read_id}')
+        except:
+            logging.exception(f'Exception occured for read: {read_info.read_id}')
 
     return all_examples
 
 
 def main(args: argparse.Namespace) -> None:
+    logging.basicConfig(filename='log.txt', level=logging.INFO)
+    logging.info('Logging started')
+
     tqdm.write(f'Parsing reference file {args.reference}')
     aligner = get_aligner(args.reference)
 
