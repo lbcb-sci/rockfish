@@ -1,4 +1,3 @@
-from os import write
 from ont_fast5_api.fast5_interface import get_fast5_file
 from ont_fast5_api.fast5_read import Fast5Read
 from tqdm import tqdm
@@ -11,8 +10,8 @@ import logging
 
 from typing import *
 
-from fast5 import load_read, ReadInfo
-from alignment import AlignmentInfo, get_aligner, align_read
+from fast5 import load_read
+from alignment import get_aligner
 from extract import Example, extract_features, MotifPositions, build_reference_idx
 from writer import BinaryWriter
 
@@ -50,14 +49,17 @@ def process_worker(path: Path) -> List[Example]:
     for read in get_reads(path):
         try:
             read_info = load_read(read)
-            examples = extract_features(read_info, ref_positions, aligner, window,
-                                        mapq_filter)
+            examples = extract_features(read_info, ref_positions, aligner,
+                                        window, mapq_filter)
 
             if examples is not None:
                 all_examples.extend(examples)
-            logging.info(f'Successfully generated examples for read: {read_info.read_id}')
+            logging.info(
+                f'Successfully generated examples for read: {read_info.read_id}'
+            )
         except:
-            logging.exception(f'Exception occured for read: {read_info.read_id}')
+            logging.exception(
+                f'Exception occured for read: {read_info.read_id}')
 
     return all_examples
 

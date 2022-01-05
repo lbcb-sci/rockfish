@@ -113,7 +113,8 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         assert move_end - move_start == n_blocks, f"n_moves {move_end - move_start}, n_blocks {n_blocks}"
         assert read_info.move_table[
             move_start] == 1, 'First element of move table has to start with 1.'
-        q_indices = read_info.move_table[move_start:move_end].cumsum().tolist()
+        q_indices = (read_info.move_table[move_start:move_end].cumsum() -
+                     1).tolist()
 
         event_lengts = [
             event_len_fn(p) for p in range(rel - window, rel + window + 1)
