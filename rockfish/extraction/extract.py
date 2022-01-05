@@ -9,6 +9,8 @@ from typing import *
 from fast5 import ReadInfo
 from alignment import AlignmentInfo, align_read
 
+MotifPositions = Dict[str, Tuple[Set[int], Set[int]]]
+
 
 @dataclass
 class Example:
@@ -18,9 +20,7 @@ class Example:
     signal: List[float]
     event_length: List[int]
     bases: str
-
-
-MotifPositions = Dict[str, Tuple[Set[int], Set[int]]]
+    q_indices: List[int]
 
 
 def build_reference_idx(aligner: mappy.Aligner, motif: str,
@@ -82,6 +82,7 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
     signal = read_info.get_normalized_signal(end=seq_to_sig[-1]) \
                         .astype(np.half)
     query, _ = read_info.get_seq_and_quals()
+    example_bases = (2 * window) + 1
 
     aln_info = align_read(query, aligner, mapq_filter, read_info.read_id)
     if aln_info is None:
@@ -103,9 +104,16 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         # sig_end -> Start of the first signal point after example
         sig_end = seq_to_sig[q_end]
 
-        length = sig_end - sig_start
-        if length < 50 or length > 1200:
+        n_blocks = (sig_end - sig_start) // read_info.block_stride
+        if n_blocks < example_bases or n_blocks > 20 * example_bases:
             continue
+
+        move_start = (sig_start - seq_to_sig[0]) // 5
+        move_end = (sig_end - seq_to_sig[0]) // 5
+        assert move_end - move_start == n_blocks, f"n_moves {move_end - move_start}, n_blocks {n_blocks}"
+        assert read_info.move_table[
+            move_start] == 1, 'First element of move table has to start with 1.'
+        q_indices = read_info.move_table[move_start:move_end].cumsum().tolist()
 
         event_lengts = [
             event_len_fn(p) for p in range(rel - window, rel + window + 1)
@@ -113,7 +121,7 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
 
         example = Example(read_info.read_id, aln_info.ctg, pos,
                           signal[sig_start:sig_end], event_lengts,
-                          ref_seq[rel - window:rel + window + 1])
+                          ref_seq[rel - window:rel + window + 1], q_indices)
         examples.append(example)
 
     return examples

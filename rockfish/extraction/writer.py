@@ -29,11 +29,13 @@ class BinaryWriter:
     def write_example(self, example: Example) -> None:
         ref_id = self.ref_ids[example.ctg]
         n_points = len(example.signal)
+        q_indices_len = len(example.q_indices)
 
-        data = struct.pack(f'=36sHIH{n_points}e{self.S}H{self.S}s',
-                           str.encode(example.read_id), ref_id, example.pos,
-                           len(example.signal), *example.signal,
-                           *example.event_length, str.encode(example.bases))
+        data = struct.pack(
+            f'=36sHIHH{n_points}e{q_indices_len}H{self.S}H{self.S}s',
+            str.encode(example.read_id), ref_id, example.pos, n_points,
+            q_indices_len, *example.signal, *example.q_indices,
+            *example.event_length, str.encode(example.bases))
 
         self.fd.write(data)
         self.n_examples += 1
