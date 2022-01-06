@@ -19,6 +19,7 @@ from typing import *
 class Rockfish(pl.LightningModule):
     def __init__(self,
                  features: int = 384,
+                 bases_len: int = 31,
                  nhead: int = 6,
                  dim_ff: int = 1536,
                  n_layers: int = 12,
@@ -43,13 +44,13 @@ class Rockfish(pl.LightningModule):
         self.codebook = nn.Linear(features, codebook_size, bias=False)
 
         self.embedding_dropout = nn.Dropout(p=pos_dropout)
-        self.pe = PositionalEncoding(features, pos_dropout, 25)
+        self.pe = PositionalEncoding(features, pos_dropout, bases_len)
 
         self.encoder = RockfishEncoder(features, self.aln_dim, nhead, dim_ff,
                                        n_layers, attn_dropout)
 
         self.layer_norm = nn.LayerNorm(features)
-        # self.pooling = PositionAwarePooling(25, features)
+        # self.pooling = PositionAwarePooling(bases_len, features)
 
         self.fc_mod = nn.Linear(features, 1)
         self.fc_mask = nn.Linear(features, 4)

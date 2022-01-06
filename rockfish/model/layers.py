@@ -46,10 +46,10 @@ class RockfishEncoder(nn.Module):
 
 
 class AlignmentNorm(nn.Module):
-    def __init__(self, aln_dim: int) -> None:
+    def __init__(self, aln_dim: int, n_bases: int) -> None:
         super().__init__()
 
-        self.norm = nn.LayerNorm(25)
+        self.norm = nn.LayerNorm(n_bases)
 
     def forward(self, aln: Tensor) -> Tensor:
         aln = aln.transpose(3, 1)  # BxTxSxE -> BxExSxT

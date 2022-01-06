@@ -74,6 +74,7 @@ class Example:
     ctg: int
     pos: int
     signal: List[float]
+    q_indices: List[int]
     lengths: List[int]
     bases: str
 
@@ -81,17 +82,21 @@ class Example:
 def read_example(fd: BufferedReader, offset: int, seq_len: int) -> Example:
     fd.seek(offset)
 
-    read_id, ctg, pos, n_points = struct.unpack('=36sHIH', fd.read(44))
+    read_id, ctg, pos, n_points, q_indices_len = struct.unpack(
+        '=36sHIHH', fd.read(46))
 
-    n_bytes = 2 * n_points + 3 * seq_len
-    data = struct.unpack(f'={n_points}e{seq_len}H{seq_len}s', fd.read(n_bytes))
+    n_bytes = 2 * n_points + 2 * q_indices_len + 3 * seq_len
+    data = struct.unpack(f'={n_points}e{q_indices_len}H{seq_len}H{seq_len}s',
+                         fd.read(n_bytes))
+    event_len_start = n_points + q_indices_len
 
     return Example(read_id.decode(), ctg, pos, data[:n_points],
-                   data[n_points:-1], data[-1].decode())
+                   data[n_points:event_len_start], data[event_len_start:-1],
+                   data[-1].decode())
 
 
 class RFDataset(Dataset):
-    def __init__(self, path=str, labels=str, window: int = 12) -> None:
+    def __init__(self, path=str, labels=str, window: int = 15) -> None:
         super(Dataset, self).__init__()
 
         self.seq_len = (2 * window) + 1
