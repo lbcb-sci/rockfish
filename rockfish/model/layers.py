@@ -332,7 +332,9 @@ class PositionAwarePooling(nn.Module):
         return output
 
 
-def add_positional_encoding(x: Tensor, event_length: Tensor) -> Tensor:
+def add_positional_encoding(x: Tensor,
+                            event_length: Tensor,
+                            mask: Optional[List[Tensor]] = None) -> Tensor:
     B, S, E = x.shape
     _, T = event_length.shape
 
@@ -342,16 +344,21 @@ def add_positional_encoding(x: Tensor, event_length: Tensor) -> Tensor:
     bases_position = torch.arange(0, T, dtype=torch.float, device=x.device)
 
     div_term = torch.exp(
-        torch.arange(0, E, 2, device=x.device).float() *
+        torch.arange(0, E, 4, device=x.device).float() *
         (-math.log(10000.0) / E))
 
-    pe[:, :, 1::2] = torch.cos(signal_position * div_term)  # Absolute position
+    pe[:, :, 0::4] = torch.sin(signal_position * div_term)  # Absolute position
+    pe[:, :, 1::4] = torch.cos(signal_position * div_term)
 
     for i in range(B):  # Alignment position
         block_lengths = torch.div(event_length[i], 5, rounding_mode='floor')
         b_idx = torch.repeat_interleave(bases_position,
                                         block_lengths).unsqueeze(1)
 
-        pe[i, :len(b_idx), 0::2] = torch.cos(b_idx * div_term)
+        if mask is not None:
+            b_idx *= ~mask[i].unsqueeze(1)
+
+        pe[i, :len(b_idx), 2::4] = torch.sin(b_idx * div_term)
+        pe[i, :len(b_idx), 3::4] = torch.cos(b_idx * div_term)
 
     return x + pe
