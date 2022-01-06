@@ -105,7 +105,7 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         sig_end = seq_to_sig[q_end]
 
         n_blocks = (sig_end - sig_start) // read_info.block_stride
-        if n_blocks < example_bases or n_blocks > 20 * example_bases:
+        if n_blocks < example_bases or n_blocks > 4 * example_bases:
             continue
 
         move_start = (sig_start - seq_to_sig[0]) // 5
