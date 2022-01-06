@@ -45,33 +45,56 @@ class RockfishEncoder(nn.Module):
         return signal, bases, alignment
 
 
-class RockfishLayer(nn.Module):
-    def __init__(self, embed_dim: int, aln_dim: int, nhead: int, dim_ff: int,
-                 dropout: float):
+class AlignmentNorm(nn.Module):
+    def __init__(self, aln_dim: int) -> None:
         super().__init__()
 
-        self.signal_attn = nn.TransformerEncoderLayer(embed_dim,
-                                                      nhead,
-                                                      dim_ff,
-                                                      dropout,
-                                                      activation=F.gelu,
-                                                      batch_first=True,
-                                                      norm_first=True)
-        self.base_attn = RFDecoderLayer(embed_dim,
-                                        aln_dim,
-                                        nhead,
-                                        dim_ff,
-                                        dropout,
-                                        activation=F.gelu)
+        self.norm = nn.LayerNorm(25)
 
+    def forward(self, aln: Tensor) -> Tensor:
+        aln = aln.transpose(3, 1)  # BxTxSxE -> BxExSxT
+        aln = self.norm(aln)
+        aln = aln.transpose(3, 1)  # BxExSxT -> BxTxSxE
+
+        return aln
+
+
+class RockfishLayer(nn.Module):
+    def __init__(self,
+                 embed_dim: int,
+                 aln_dim: int,
+                 nhead: int,
+                 dim_ff: int,
+                 dropout: float = 0.0):
+        super().__init__()
+
+        self.signal_attn = RockfishDecoderLayerTemp(embed_dim, nhead, dim_ff,
+                                                    None, dropout)
+        self.bases_norm = nn.LayerNorm(embed_dim)
+
+        self.base_attn = RockfishDecoderLayerTemp(embed_dim, nhead, dim_ff,
+                                                  None, dropout)
+        self.signal_norm = nn.LayerNorm(embed_dim)
+
+        # self.aln_norm = AlignmentNorm(aln_dim)
         # self.aln_block = AlignmentBlock(embed_dim, aln_dim)
 
     def forward(
-            self, signal: Tensor, bases: Tensor, aln: Tensor,
+            self, signal: Tensor, bases: Tensor, aln: Optional[Tensor],
             signal_mask: Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]:
-        signal = self.signal_attn(signal, src_key_padding_mask=signal_mask)
-        bases = self.base_attn(bases, signal, aln, signal_mask)
-        # aln = self.aln_block(signal, bases, aln, signal_mask)
+
+        signal = self.signal_attn(signal,
+                                  self.bases_norm(bases),
+                                  None,
+                                  tgt_key_padding_mask=signal_mask)
+
+        bases = self.base_attn(bases,
+                               self.signal_norm(signal),
+                               None,
+                               memory_key_padding_mask=signal_mask)
+
+        if aln is not None:
+            aln = self.aln_block(signal, bases, aln, signal_mask)
 
         return signal, bases, aln
 
@@ -86,6 +109,8 @@ def scaled_attn(q: Tensor,
     q = q / math.sqrt(d)
 
     attn = torch.matmul(q, k.transpose(3, 2))  # + aln  # BxHxTxS
+    if aln is not None:
+        attn += aln
     if mask is not None:
         attn += mask
 
@@ -101,7 +126,7 @@ class MHAttention(nn.Module):
     def __init__(self,
                  embedding_dim: int,
                  heads: int,
-                 aln_embedding_dim: int,
+                 aln_embedding_dim: Optional[int],
                  dropout: float = 0.0):
         super().__init__()
 
@@ -116,7 +141,10 @@ class MHAttention(nn.Module):
         self.q_proj = nn.Linear(embedding_dim, embedding_dim, bias=False)
         self.k_proj = nn.Linear(embedding_dim, embedding_dim, bias=False)
         self.v_proj = nn.Linear(embedding_dim, embedding_dim, bias=False)
-        # self.aln_proj = nn.Linear(aln_embedding_dim, heads, bias=False)
+
+        if aln_embedding_dim is not None:
+            self.aln_proj = nn.Linear(aln_embedding_dim, heads, bias=False)
+
         self.out_proj = nn.Linear(embedding_dim, embedding_dim)
 
     def prepare_for_attn(self, layer: nn.Module, x: Tensor) -> Tensor:
@@ -136,33 +164,35 @@ class MHAttention(nn.Module):
         return mask  # BxHx1xS
 
     def prepare_alignment(self, alignment: Tensor) -> Tensor:
-        aln = self.aln_proj(alignment)  # BxTxSxH
+        aln = self.aln_proj(alignment)  # BxTxSxE -> BxTxSxH
         aln = aln.permute(0, 3, 1, 2)  # BxHxTxS
         return aln
 
     def forward(self,
-                signal: Tensor,
-                bases: Tensor,
-                signal_padding_mask: Tensor,
-                alignment: Tensor,
+                query: Tensor,
+                key: Tensor,
+                value: Tensor,
+                key_padding_mask: Tensor,
+                aln: Tensor,
                 need_weight: bool = False):
-        B, T, E = bases.shape
+        B, T, E = query.shape
 
-        q = self.prepare_for_attn(self.q_proj, bases)  # BxHxTxd
-        k = self.prepare_for_attn(self.k_proj, signal)  # BxHxSxd
-        v = self.prepare_for_attn(self.v_proj, signal)  # BxHxSxd
+        q = self.prepare_for_attn(self.q_proj, query)  # BxHxTxd
+        k = self.prepare_for_attn(self.k_proj, key)  # BxHxSxd
+        v = self.prepare_for_attn(self.v_proj, value)  # BxHxSxd
 
         # BxHx1xS
-        if signal_padding_mask is not None:
-            mask = self.prepare_mask(signal_padding_mask, dtype=q.dtype)
+        if key_padding_mask is not None:
+            mask = self.prepare_mask(key_padding_mask, dtype=q.dtype)
         else:
             mask = None
-        # aln = self.prepare_alignment(alignment)  # BxHxTxS
+        if aln is not None:
+            aln = self.prepare_alignment(aln)  # BxHxTxS
 
         # Use dropout if training
         dropout = self.dropout if self.training else 0.0
 
-        output, weights = scaled_attn(q, k, v, mask, None, dropout)
+        output, weights = scaled_attn(q, k, v, mask, aln, dropout)
         output = output.transpose(2, 1).reshape(B, T, E)  # BxHxTxd -> BxTxE
         output = self.out_proj(output)
 
@@ -207,58 +237,128 @@ class AlignmentBlock(nn.Module):
         return aln + out
 
 
-class RFDecoderLayer(nn.Module):
+class LinearProjection(nn.Module):
     def __init__(self,
-                 d_model,
-                 d_aln,
-                 nhead,
-                 dim_feedforward=2048,
-                 dropout=0.1,
-                 activation=F.gelu,
-                 layer_norm_eps=1e-5,
-                 device=None,
-                 dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
-        super(RFDecoderLayer, self).__init__()
+                 embed_dim: int,
+                 dim_ff: int,
+                 dropout: float = 0.0) -> None:
+        super().__init__()
 
-        self.mha = MHAttention(d_model, nhead, d_aln, dropout)
+        self.layers = nn.Sequential(nn.Linear(embed_dim, dim_ff), nn.GELU(),
+                                    nn.Dropout(dropout),
+                                    nn.Linear(dim_ff, embed_dim),
+                                    nn.Dropout(dropout))
 
-        # Implementation of Feedforward model
-        self.activation = activation
-        self.linear1 = nn.Linear(d_model, dim_feedforward, **factory_kwargs)
-        self.dropout = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(dim_feedforward, d_model, **factory_kwargs)
+    def forward(self, x: Tensor) -> Tensor:
+        return self.layers(x)
 
-        self.norm2 = nn.LayerNorm(d_model,
-                                  eps=layer_norm_eps,
-                                  **factory_kwargs)
-        self.norm3 = nn.LayerNorm(d_model,
-                                  eps=layer_norm_eps,
-                                  **factory_kwargs)
-        self.dropout2 = nn.Dropout(dropout)
-        self.dropout3 = nn.Dropout(dropout)
 
-    def __setstate__(self, state):
-        if 'activation' not in state:
-            state['activation'] = F.relu
-        super(RFDecoderLayer, self).__setstate__(state)
+class RockfishDecoderLayerTemp(nn.Module):
+    def __init__(self,
+                 embed_dim: int,
+                 num_heads: int,
+                 dim_ff: int,
+                 aln_dim: Optional[int],
+                 dropout: float = 0.0) -> None:
+        super().__init__()
+
+        self.self_norm = nn.LayerNorm(embed_dim)
+        self.self_attn = nn.MultiheadAttention(embed_dim,
+                                               num_heads,
+                                               dropout,
+                                               batch_first=True)
+        self.self_do = nn.Dropout(dropout)
+
+        self.mha_norm = nn.LayerNorm(embed_dim)
+        self.rf_attn = MHAttention(embed_dim, num_heads, aln_dim, dropout)
+        self.mha_do = nn.Dropout(dropout)
+
+        self.linear_norm = nn.LayerNorm(embed_dim)
+        self.linear = LinearProjection(embed_dim, dim_ff, dropout)
 
     def forward(self,
-                bases: Tensor,
-                signal: Tensor,
-                alignment: Tensor,
-                signal_mask: Optional[Tensor] = None) -> Tensor:
-        x = bases
-        x = x + self.dropout2(
-            self.mha(signal,
-                     self.norm2(bases),
-                     signal_mask,
-                     alignment,
-                     need_weight=False)[0])
-        x = x + self._ff_block(self.norm3(x))
+                tgt: Tensor,
+                memory: Tensor,
+                aln: Tensor,
+                tgt_mask: Optional[Tensor] = None,
+                memory_mask: Optional[Tensor] = None,
+                tgt_key_padding_mask: Optional[Tensor] = None,
+                memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+        x = tgt
+
+        x = x + self._sa_block(self.self_norm(x), tgt_mask,
+                               tgt_key_padding_mask)
+        x = x + self._mha_block(self.mha_norm(x), memory, aln,
+                                memory_key_padding_mask)
+        x = x + self.linear(self.linear_norm(x))
 
         return x
 
-    def _ff_block(self, x: Tensor) -> Tensor:
-        x = self.linear2(self.dropout(self.activation(self.linear1(x))))
-        return self.dropout3(x)
+    def _sa_block(self, x: Tensor, attn_mask: Optional[Tensor],
+                  key_padding_mask: Optional[Tensor]) -> Tensor:
+        x = self.self_attn(x,
+                           x,
+                           x,
+                           attn_mask=attn_mask,
+                           key_padding_mask=key_padding_mask,
+                           need_weights=False)[0]
+        return self.self_do(x)
+
+    def _mha_block(self, x: Tensor, mem: Tensor, alignment: Optional[Tensor],
+                   key_padding_mask: Optional[Tensor]) -> Tensor:
+        x = self.rf_attn(x,
+                         mem,
+                         mem,
+                         key_padding_mask,
+                         alignment,
+                         need_weight=False)[0]
+
+        return self.mha_do(x)
+
+
+class PositionAwarePooling(nn.Module):
+    def __init__(self, seq_len: int, embed_dim: int) -> None:
+        super().__init__()
+
+        tensor = torch.zeros(seq_len, embed_dim)
+        tensor[seq_len // 2] = 1
+        self.scores = nn.parameter.Parameter(tensor, requires_grad=True)
+
+    def forward(self, x: Tensor) -> Tensor:
+        scores = self.scores.softmax(
+            dim=0)  # Normalize over timesteps for each feature
+        output = (scores * x).sum(dim=1)  # BxTxF->BxF
+
+        return output
+
+
+def add_positional_encoding(x: Tensor,
+                            event_length: Tensor,
+                            mask: Optional[List[Tensor]] = None) -> Tensor:
+    B, S, E = x.shape
+    _, T = event_length.shape
+
+    pe = torch.zeros(B, S, E, device=x.device)
+    signal_position = torch.arange(0, S, dtype=torch.float,
+                                   device=x.device).unsqueeze(1)
+    bases_position = torch.arange(0, T, dtype=torch.float, device=x.device)
+
+    div_term = torch.exp(
+        torch.arange(0, E, 4, device=x.device).float() *
+        (-math.log(10000.0) / E))
+
+    pe[:, :, 0::4] = torch.sin(signal_position * div_term)  # Absolute position
+    pe[:, :, 1::4] = torch.cos(signal_position * div_term)
+
+    for i in range(B):  # Alignment position
+        block_lengths = torch.div(event_length[i], 5, rounding_mode='floor')
+        b_idx = torch.repeat_interleave(bases_position,
+                                        block_lengths).unsqueeze(1)
+
+        if mask is not None:
+            b_idx *= ~mask[i].unsqueeze(1)
+
+        pe[i, :len(b_idx), 2::4] = torch.sin(b_idx * div_term)
+        pe[i, :len(b_idx), 3::4] = torch.cos(b_idx * div_term)
+
+    return x + pe
