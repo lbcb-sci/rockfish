@@ -33,6 +33,8 @@ class Rockfish(pl.LightningModule):
         super(Rockfish, self).__init__()
         self.save_hyperparameters()
         self.aln_dim = nhead * 4
+        self.central_base = bases_len // 2
+        self.signal_mask_prob = signal_mask_prob
 
         self.signal_embedding = nn.Linear(5, features)
         self.base_embedding = nn.Embedding(5, features)  # removed max_norm=1
@@ -91,13 +93,12 @@ class Rockfish(pl.LightningModule):
 
         return aln  # BxTxS
 
-    def mask_signal(self, signal, n_points):
+    def mask_signal(self, signal, n_points, mask_prob):
         lengths = torch.div(n_points, 5, rounding_mode='floor')
 
         code_logits, masks = [], []
         for i in range(signal.shape[0]):
-            mask = torch.rand(
-                lengths[i], device=self.device) < self.hparams.signal_mask_prob
+            mask = torch.rand(lengths[i], device=self.device) < mask_prob
             masks.append(mask)
 
             c_logits = self.codebook(signal[i, :lengths[i]][mask])  # mxK
@@ -114,12 +115,12 @@ class Rockfish(pl.LightningModule):
 
         return torch.cat(code_logits, dim=0)
 
-    def forward(self, signal, event_length, bases):
+    def forward(self, signal, event_length, bases, q_indices):
         signal = signal.unfold(-1, 5, 5)  # Converting to blocks
         B, S, _ = signal.shape
 
         signal = self.signal_embedding(signal)  # BxSxE
-        signal = add_positional_encoding(signal, event_length)
+        signal = add_positional_encoding(signal, q_indices, event_length)
         signal = self.embedding_dropout(signal)
         # signal = self.pe(signal)
 
@@ -136,20 +137,29 @@ class Rockfish(pl.LightningModule):
         _, bases, _ = self.encoder(signal, bases, alignment, padding_mask)
 
         bases = self.layer_norm(bases)  # BxTxE
-        x = bases[:, 12]
+        x = bases[:, self.central_base]
         # x = self.pooling(bases)  # BxTxF->BxF
 
         return self.fc_mod(x).squeeze(-1)  # BxE -> B
 
-    def forward_train(self, signal, event_length, bases, bases_mask=None):
+    def forward_train(self,
+                      signal,
+                      event_length,
+                      bases,
+                      q_indices,
+                      bases_mask=None):
         n_points = event_length.sum(dim=1)
 
         signal = signal.unfold(-1, 5, 5)  # Converting to blocks
         B, S, _ = signal.shape
 
         signal = self.signal_embedding(signal)  # BxSxE
-        signal_code_logits, masks = self.mask_signal(signal, n_points)
-        signal = add_positional_encoding(signal, event_length, mask=masks)
+        signal_code_logits, masks = self.mask_signal(signal, n_points,
+                                                     self.signal_mask_prob)
+        signal = add_positional_encoding(signal,
+                                         q_indices,
+                                         event_length,
+                                         mask=masks)
         signal = self.embedding_dropout(signal)
         # signal = self.pe(signal)
 
@@ -167,7 +177,7 @@ class Rockfish(pl.LightningModule):
         context_code_logits = self.get_context_code_probs(signal, masks)
 
         bases = self.layer_norm(bases)  # BxTxE
-        x = bases[:, 12]
+        x = bases[:, self.central_base]
         # x = self.pooling(bases)
         mod_logits = self.fc_mod(x).squeeze(-1)  # BxE -> B
 
@@ -185,6 +195,9 @@ class Rockfish(pl.LightningModule):
                                       eps=1e-6)
         return optimizer
 
+    def optimizer_zero_grad(self, epoch, batch_idx, optimizer, optimizer_idx):
+        optimizer.zero_grad(set_to_none=True)
+
     def get_diversity_loss(self, signal_code_logits):
         probs = signal_code_logits.softmax(dim=-1)
         avg_probs = probs.mean(dim=0)  # K
@@ -197,7 +210,7 @@ class Rockfish(pl.LightningModule):
                         reduction='batchmean')
 
     def training_step(self, batch, batch_idx):
-        signal, bases, lengths, y = batch  # BxSx14, BxS, BxS, B
+        signal, bases, q_indices, lengths, y = batch  # BxSx14, BxS, BxS, B
 
         probs = torch.rand(*bases.shape, device=bases.device)
         mask = probs < self.hparams.bases_mask_prob
@@ -210,7 +223,7 @@ class Rockfish(pl.LightningModule):
                                          device=bases.device)
 
         mod_logits, mask_logits, signal_code_logits, context_code_logits = self.forward_train(
-            signal, lengths, bases, mask)
+            signal, lengths, bases, q_indices, mask)
 
         signal_mask_targets = signal_code_logits.argmax(dim=-1).detach()
         signal_mask_loss = F.cross_entropy(context_code_logits,
@@ -239,9 +252,9 @@ class Rockfish(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        signal, bases, lengths, y = batch  # BxS_MAX, BxT, BxT, B
+        signal, bases, q_indices, lengths, y = batch  # BxS_MAX, BxT, BxT, B
 
-        logits = self(signal, lengths, bases)
+        logits = self(signal, lengths, bases, q_indices)
         loss = F.binary_cross_entropy_with_logits(logits, y.float())
 
         self.log('val_loss', loss, prog_bar=True)

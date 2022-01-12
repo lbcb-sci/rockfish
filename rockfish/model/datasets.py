@@ -116,19 +116,21 @@ class RFDataset(Dataset):
 
         signal = torch.tensor(example.signal)
         bases = torch.tensor([ENCODING[b] for b in example.bases])
+        q_indices = torch.tensor(example.q_indices)
         lengths = torch.tensor(example.lengths)
         label = self.labels.get_label(example.read_id, self.ctgs[example.ctg],
                                       example.pos)
 
-        return signal, bases, lengths, label
+        return signal, bases, q_indices, lengths, label
 
 
 def collate_fn(batch):
-    signals, bases, lengths, labels = zip(*batch)
+    signals, bases, q_indices, lengths, labels = zip(*batch)
     signals = pad_sequence(signals, batch_first=True)  # BxMAX_LEN
+    q_indices = pad_sequence(q_indices, batch_first=True)  # [B,MAX_LEN//5]
 
-    return signals, torch.stack(bases, 0), torch.stack(lengths,
-                                                       0), torch.tensor(labels)
+    return signals, torch.stack(bases, 0), q_indices, torch.stack(
+        lengths, 0), torch.tensor(labels)
 
 
 def worker_init_fn(worker_id: int) -> None:
