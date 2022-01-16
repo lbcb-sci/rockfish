@@ -79,9 +79,11 @@ def main(args: argparse.Namespace) -> None:
 
     in_queue = mp.Queue()
     out_queue = mp.Queue()
-    workers = [None] * args.workers
-    writers_path = [None] * args.workers
-    for i in range(args.workers):
+
+    n_workers = min(args.workers, len(files))
+    workers = [None] * n_workers
+    writers_path = [None] * n_workers
+    for i in range(n_workers):
         writers_path[i] = args.dest.parent / (args.dest.name + f'{i}.tmp')
         workers[i] = mp.Process(target=process_worker,
                                 args=(aligner, ref_positions, args.window,
@@ -93,7 +95,7 @@ def main(args: argparse.Namespace) -> None:
     tqdm.write('Processing started.')
     for p in files:
         in_queue.put(p)
-    for _ in range(args.workers):
+    for _ in range(n_workers):
         in_queue.put(None)
 
     pbar = tqdm(total=len(files))
