@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 import multiprocessing as mp
 import argparse
+import traceback
 
 from typing import *
 
@@ -16,9 +17,9 @@ from alignment import get_aligner
 from extract import Example, extract_features, MotifPositions, build_reference_idx
 from writer import BinaryWriter
 
-root = Path(__file__).resolve().parents[1]
-sys.path.append(root)
-from rftools.merge import merge
+root = Path(__file__).resolve().parents[1] / 'rftools'
+sys.path.append(str(root))
+from merge import merge
 
 
 def get_files(path: Path, recursive: bool = False) -> Iterator[Path]:
@@ -53,8 +54,10 @@ def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
                     examples = extract_features(read_info, ref_positions,
                                                 aligner, window, mapq_filter)
 
-                    writer.write_examples(examples)
+                    if examples is not None:
+                        writer.write_examples(examples)
                 except:
+                    print(traceback.format_exc())
                     print(f'Exception occured for read: {read_info.read_id}',
                           file=sys.stderr)
 
@@ -72,14 +75,14 @@ def main(args: argparse.Namespace) -> None:
 
     tqdm.write(
         f'Retrieving files from {args.source}, recursive {args.recursive}')
-    files = get_files(args.source, args.recursive)
+    files = list(get_files(args.source, args.recursive))
 
     in_queue = mp.Queue()
     out_queue = mp.Queue()
     workers = [None] * args.workers
     writers_path = [None] * args.workers
     for i in range(args.workers):
-        writers_path[i] = args.dest / f'{i}.tmp'
+        writers_path[i] = args.dest.parent / (args.dest.name + f'{i}.tmp')
         workers[i] = mp.Process(target=process_worker,
                                 args=(aligner, ref_positions, args.window,
                                       args.mapq_filter, writers_path[i],
@@ -90,9 +93,11 @@ def main(args: argparse.Namespace) -> None:
     tqdm.write('Processing started.')
     for p in files:
         in_queue.put(p)
+    for _ in range(args.workers):
+        in_queue.put(None)
 
-    done, pbar = 0, tqdm(total=len(files))
-    while done < len(files):
+    pbar = tqdm(total=len(files))
+    while pbar.n < len(files):
         _ = out_queue.get()
         pbar.update()
 
