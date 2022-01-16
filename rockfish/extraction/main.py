@@ -84,7 +84,7 @@ def main(args: argparse.Namespace) -> None:
     workers = [None] * n_workers
     writers_path = [None] * n_workers
     for i in range(n_workers):
-        writers_path[i] = args.dest.parent / (args.dest.name + f'{i}.tmp')
+        writers_path[i] = args.dest.parent / (args.dest.name + f'.{i}.tmp')
         workers[i] = mp.Process(target=process_worker,
                                 args=(aligner, ref_positions, args.window,
                                       args.mapq_filter, writers_path[i],
