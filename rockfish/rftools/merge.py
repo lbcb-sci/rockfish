@@ -95,7 +95,7 @@ def merge(src: List[str], dest: str, seq_len: int) -> None:
                         f'ERROR: {rf_file} EOF expected but data was read.')
                     sys.exit(1)
 
-    tqdm.write('Processing finished.')
+    tqdm.write('Processing finished')
 
 
 def parse_arguments() -> argparse.Namespace:
