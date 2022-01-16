@@ -15,7 +15,10 @@ from fast5 import load_read
 from alignment import get_aligner
 from extract import Example, extract_features, MotifPositions, build_reference_idx
 from writer import BinaryWriter
-from ..rftools.merge import merge
+
+root = Path(__file__).resolve().parents[1]
+sys.path.append(root)
+from rftools.merge import merge
 
 
 def get_files(path: Path, recursive: bool = False) -> Iterator[Path]:
