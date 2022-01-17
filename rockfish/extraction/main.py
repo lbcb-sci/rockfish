@@ -123,7 +123,7 @@ def get_arguments() -> argparse.Namespace:
 
     parser.add_argument('-r', '--recursive', action='store_true')
 
-    parser.add_argument('--window', type=int, default=15)
+    parser.add_argument('-w', '--window', type=int, default=15)
     parser.add_argument('-q', '--mapq_filter', action='store_true')
 
     parser.add_argument('-t', '--workers', type=int, default=1)
