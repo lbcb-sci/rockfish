@@ -57,9 +57,9 @@ def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
                     if examples is not None:
                         writer.write_examples(examples)
                 except:
-                    print(traceback.format_exc())
-                    print(f'Exception occured for read: {read_info.read_id}',
-                          file=sys.stderr)
+                    print(
+                        f'Exception occured for read: {read_info.read_id} in file {path}',
+                        file=sys.stderr)
 
             out_queue.put(path)
 
