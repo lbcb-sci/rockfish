@@ -341,12 +341,12 @@ def add_positional_encoding(x: Tensor,
     _, T = event_length.shape
 
     pe = torch.zeros(B, S, E, device=x.device)
-    signal_position = torch.arange(0, S, dtype=torch.float,
+    signal_position = torch.arange(0, S, dtype=x.dtype,
                                    device=x.device).unsqueeze(1)
-    bases_position = torch.arange(0, T, dtype=torch.float, device=x.device)
+    bases_position = torch.arange(0, T, dtype=x.dtype, device=x.device)
 
     div_term = torch.exp(
-        torch.arange(0, E, 3, device=x.device).float() *
+        torch.arange(0, E, 3, dtype=x.dtype, device=x.device) *
         (-math.log(10000.0) / E))
 
     pe[:, :, 0::3] = torch.cos(signal_position * div_term)

@@ -21,7 +21,7 @@ def parse_gpus(string):
 
 
 class RFDataset(Dataset):
-    def __init__(self, path=str, window: int = 12) -> None:
+    def __init__(self, path=str, window: int = 15) -> None:
         super(Dataset, self).__init__()
 
         self.seq_len = (2 * window) + 1
@@ -40,18 +40,20 @@ class RFDataset(Dataset):
 
         signal = torch.tensor(example.signal)
         bases = torch.tensor([ENCODING[b] for b in example.bases])
+        q_indices = torch.tensor(example.q_indices)
         lengths = torch.tensor(example.lengths)
 
         return example.read_id, self.ctgs[
-            example.ctg], example.pos, signal, bases, lengths
+            example.ctg], example.pos, signal, bases, q_indices, lengths
 
 
 def collate_fn(batch):
-    read_ids, ctgs, poss, signals, bases, lengths = zip(*batch)
+    read_ids, ctgs, poss, signals, bases, q_indices, lengths = zip(*batch)
     signals = pad_sequence(signals, batch_first=True)  # BxMAX_LEN
+    q_indices = pad_sequence(q_indices, batch_first=True)  # [B,MAX_LEN//5]
 
-    return read_ids, ctgs, poss, signals, torch.stack(bases, 0), torch.stack(
-        lengths, 0)
+    return read_ids, ctgs, poss, signals, torch.stack(
+        bases, 0), q_indices, torch.stack(lengths, 0)
 
 
 def worker_init_fn(worker_id: int) -> None:
@@ -62,10 +64,13 @@ def worker_init_fn(worker_id: int) -> None:
     dataset.ctgs = parse_ctgs(dataset.fd)
 
 
+@torch.no_grad
 def inference(args):
-    model = Rockfish.load_from_checkpoint(args.ckpt_path).half()
+    model = Rockfish.load_from_checkpoint(args.ckpt_path)
     model.eval()
     model.freeze()
+
+    torch.backends.cudnn.benchmark = False
 
     gpus = parse_gpus(args.gpus) if args.gpus is not None else None
     if gpus is not None and torch.cuda.is_available():
@@ -86,11 +91,13 @@ def inference(args):
                         pin_memory=True)
 
     with open(args.output, 'w') as f, tqdm(total=len(data)) as pbar:
-        for ids, ctgs, poss, signals, bases, lens in loader:
-            signals, bases, lens = (signals.to(device), bases.to(device),
-                                    lens.to(device))
+        for ids, ctgs, poss, signals, bases, q_indices, lens in loader:
+            signals, bases, q_indices, lens = (signals.to(device),
+                                               bases.to(device),
+                                               q_indices.to(device),
+                                               lens.to(device))
 
-            logits = model(signals, lens, bases).cpu().numpy()  # N
+            logits = model(signals, lens, bases, q_indices).cpu().numpy()  # N
 
             for id, ctg, pos, logit in zip(ids, ctgs, poss, logits):
                 print(id, ctg, pos, logit, file=f, sep='\t')
