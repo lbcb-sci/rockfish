@@ -38,7 +38,7 @@ class RFDataset(Dataset):
     def __getitem__(self, idx):
         example = read_example(self.fd, self.offsets[idx], self.seq_len)
 
-        signal = torch.tensor(example.signal)
+        signal = torch.tensor(example.signal, dtype=torch.half)
         bases = torch.tensor([ENCODING[b] for b in example.bases])
         q_indices = torch.tensor(example.q_indices)
         lengths = torch.tensor(example.lengths)
@@ -64,7 +64,7 @@ def worker_init_fn(worker_id: int) -> None:
     dataset.ctgs = parse_ctgs(dataset.fd)
 
 
-@torch.no_grad
+@torch.no_grad()
 def inference(args):
     model = Rockfish.load_from_checkpoint(args.ckpt_path)
     model.eval()
@@ -90,7 +90,7 @@ def inference(args):
                         worker_init_fn=worker_init_fn,
                         pin_memory=True)
 
-    with open(args.output, 'w') as f, tqdm(total=len(data)) as pbar:
+    with open(args.output, 'w') as f, tqdm(total=len(data)) as pbar, torch.cuda.amp.autocast():
         for ids, ctgs, poss, signals, bases, q_indices, lens in loader:
             signals, bases, q_indices, lens = (signals.to(device),
                                                bases.to(device),
