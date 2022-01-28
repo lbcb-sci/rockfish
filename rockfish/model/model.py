@@ -254,7 +254,7 @@ class RockfishLightningCLI(LightningCLI):
 
 
 def cli_main():
-    LightningCLI(
+    RockfishLightningCLI(
         Rockfish,
         RFDataModule,
         seed_everything_default=42,  # 42 for first training, 43 self-distilation

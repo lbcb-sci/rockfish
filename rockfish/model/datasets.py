@@ -111,7 +111,7 @@ class MappingEncodings:
 
 
 class RFDataset(Dataset):
-    def __init__(self, path: str, labels: str, features: int, seq_len: int,
+    def __init__(self, path: str, labels: str, seq_len: int,
                  block_size: int) -> None:
         super(Dataset, self).__init__()
 
@@ -176,7 +176,6 @@ class RFDataModule(pl.LightningDataModule):
                  val_labels: str,
                  train_batch_size: int = 256,
                  val_batch_size: int = 512,
-                 features: int = 384,
                  seq_len: int = 31,
                  block_size: int = 5) -> None:
         super(RFDataModule, self).__init__()
@@ -188,7 +187,6 @@ class RFDataModule(pl.LightningDataModule):
         self.train_batch_size = train_batch_size
         self.val_batch_size = val_batch_size
 
-        self.features = features
         self.seq_len = seq_len
         self.block_size = block_size
 
@@ -198,11 +196,9 @@ class RFDataModule(pl.LightningDataModule):
     def setup(self, stage: Optional[str] = None) -> None:
         if stage == 'fit':
             self.train_ds = RFDataset(self.train_data, self.train_labels,
-                                      self.features, self.seq_len,
-                                      self.block_size)
+                                      self.seq_len, self.block_size)
             self.val_ds = RFDataset(self.val_data, self.val_labels,
-                                    self.features, self.seq_len,
-                                    self.block_size)
+                                    self.seq_len, self.block_size)
 
     def train_dataloader(self):
         return DataLoader(self.train_ds,
