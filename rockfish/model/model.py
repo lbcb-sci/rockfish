@@ -249,7 +249,6 @@ def get_trainer_defaults() -> Dict[str, Any]:
 class RockfishLightningCLI(LightningCLI):
     def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
         parser.link_arguments('model.bases_len', 'data.seq_len')
-        parser.link_arguments('model.features', 'data.features')
         parser.link_arguments('model.block_size', 'data.block_size')
 
 
