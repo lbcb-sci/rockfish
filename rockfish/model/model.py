@@ -7,7 +7,6 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.utilities.cli import LightningCLI, LightningArgumentParser
-
 from datasets import RFDataModule
 from layers import PositionalEncoding, RockfishEncoder, SignalPositionalEncoding
 
