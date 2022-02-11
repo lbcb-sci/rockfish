@@ -210,3 +210,40 @@ class BaseLayer(nn.Module):
         x = x + self.ff_block(self.ff_norm(x))
 
         return x
+
+
+class GRUDecoder(nn.Module):
+    def __init__(self, embed_dim: int, seq_len: int) -> None:
+        super().__init__()
+
+        self.seq_len = seq_len
+
+        hidden_init = torch.zeros((embed_dim, ))
+        self.hidden_init = torch.nn.Parameter(hidden_init, requires_grad=False)
+
+        self.W = nn.Linear(embed_dim, embed_dim)
+        self.layer_norm = nn.LayerNorm(2 * embed_dim)
+        self.gru = nn.GRUCell(2 * embed_dim, embed_dim)
+
+    def forward(self, signal: torch.Tensor, bases: torch.Tensor,
+                padding_mask: torch.Tensor) -> torch.Tensor:
+        attn_mask = torch.zeros_like(padding_mask, dtype=signal.dtype)
+        attn_mask.masked_fill_(padding_mask, float('-inf'))
+
+        hidden = self.hidden_init.expand(bases.size(0), -1)
+        out = []
+        for i in range(self.seq_len):
+            v = self.W(hidden).unsqueeze(1)  # [B, 1, F]
+            e = torch.bmm(v, signal.transpose(1, 2)).squeeze(1)  # [B, S]
+            e += attn_mask  # apply mask
+
+            score = e.softmax(dim=-1).unsqueeze(-1)  # [B, S, 1]
+            context = (score * signal).sum(dim=1)  # [B, F]
+
+            input = torch.cat((bases[:, i], context), dim=1)  # [B, 2F]
+            input = self.layer_norm(input)
+
+            hidden = self.gru(input, hidden)  # [B, F]
+            out.append(hidden)
+
+        return torch.stack(out, dim=1)
