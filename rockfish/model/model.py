@@ -8,7 +8,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.utilities.cli import LightningCLI, LightningArgumentParser
 from datasets import RFDataModule
-from layers import PositionalEncoding, RockfishEncoder, SignalPositionalEncoding
+from layers import GRUDecoder, SignalPositionalEncoding, PositionalEncoding
 
 from typing import *
 
@@ -49,8 +49,29 @@ class Rockfish(pl.LightningModule):
         self.ref_embedding = nn.Embedding(5, features)  # removed max_norm=1
         self.ref_pe = PositionalEncoding(features, pos_dropout, bases_len)
 
-        self.encoder = RockfishEncoder(features, nhead, dim_ff, n_layers,
-                                       attn_dropout)
+        encoder_layer = nn.TransformerEncoderLayer(features,
+                                                   nhead,
+                                                   dim_ff,
+                                                   attn_dropout,
+                                                   F.gelu,
+                                                   batch_first=True,
+                                                   norm_first=True)
+        self.encoder = nn.TransformerEncoder(encoder_layer,
+                                             n_layers,
+                                             norm=nn.LayerNorm(features))
+        decoder_layer = nn.TransformerDecoderLayer(features,
+                                                   nhead,
+                                                   dim_ff,
+                                                   attn_dropout,
+                                                   F.gelu,
+                                                   batch_first=True,
+                                                   norm_first=True)
+        self.decoder = nn.TransformerDecoder(decoder_layer, 4)
+        '''self.encoder = RockfishEncoder(features, nhead, dim_ff, n_layers,
+                                       attn_dropout)'''
+
+        # self.decoder = GRUDecoder(features, bases_len)
+        # self.encoder = LightRockfish(features, nhead, dim_ff, attn_dropout, 4)
         self.layer_norm = nn.LayerNorm(features)
 
         self.fc_mod = nn.Linear(features, 1)
@@ -102,7 +123,12 @@ class Rockfish(pl.LightningModule):
         bases = self.ref_embedding(bases)
         bases = self.ref_pe(bases)
 
-        _, bases = self.encoder(signal, bases, padding_mask)
+        # _, bases = self.encoder(signal, bases, padding_mask)
+        signal = self.encoder(signal, src_key_padding_mask=padding_mask)
+        bases = self.decoder(bases,
+                             signal,
+                             memory_key_padding_mask=padding_mask)
+        # bases = self.decoder(signal, bases, padding_mask)
 
         x = self.layer_norm(bases[:, self.central_base])
         #bases = self.layer_norm(bases)  # BxTxE
@@ -129,7 +155,12 @@ class Rockfish(pl.LightningModule):
         bases = self.ref_embedding(bases)
         bases = self.ref_pe(bases)
 
-        signal, bases = self.encoder(signal, bases, padding_mask)
+        signal = self.encoder(signal, src_key_padding_mask=padding_mask)
+        bases = self.decoder(bases,
+                             signal,
+                             memory_key_padding_mask=padding_mask)
+        #bases = self.decoder(signal, bases, padding_mask)
+        # signal, bases = self.encoder(signal, bases, padding_mask)
 
         context_code_logits = self.get_context_code_probs(signal, masks)
 
