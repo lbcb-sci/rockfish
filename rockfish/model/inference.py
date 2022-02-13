@@ -1,12 +1,13 @@
 import torch
 from torch.nn import DataParallel
+import torch.profiler
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
 import argparse
 
-from datasets import read_offsets, parse_ctgs, read_example
+from datasets import read_offsets, parse_ctgs, read_example, MappingEncodings
 from model import Rockfish
 
 ENCODING = {b: i for i, b in enumerate('ACGT')}
@@ -21,10 +22,12 @@ def parse_gpus(string):
 
 
 class RFDataset(Dataset):
-    def __init__(self, path=str, window: int = 15) -> None:
+    def __init__(self, path: str, features: int, seq_len: int,
+                 block_size: int) -> None:
         super(Dataset, self).__init__()
 
-        self.seq_len = (2 * window) + 1
+        self.seq_len = seq_len
+        self.block_size = block_size
 
         self.path = path
         self.fd = None
@@ -32,19 +35,26 @@ class RFDataset(Dataset):
 
         self.offsets = read_offsets(f'{path}.idx')
 
+        self.mapping_encoding = MappingEncodings(features, self.seq_len,
+                                                 block_size)
+
     def __len__(self):
         return len(self.offsets)
 
     def __getitem__(self, idx):
         example = read_example(self.fd, self.offsets[idx], self.seq_len)
 
-        signal = torch.tensor(example.signal, dtype=torch.half)
+        signal = torch.tensor(example.signal).unfold(
+            -1, self.block_size, self.block_size)  # Converting to blocks
+
         bases = torch.tensor([ENCODING[b] for b in example.bases])
         q_indices = torch.tensor(example.q_indices)
         lengths = torch.tensor(example.lengths)
 
+        r_pos_enc, q_pos_enc = self.mapping_encoding(lengths, q_indices)
+
         return example.read_id, self.ctgs[
-            example.ctg], example.pos, signal, bases, q_indices, lengths
+            example.ctg], example.pos, signal, bases, r_pos_enc, q_pos_enc
 
 
 def collate_fn(batch):
@@ -54,6 +64,19 @@ def collate_fn(batch):
 
     return read_ids, ctgs, poss, signals, torch.stack(
         bases, 0), q_indices, torch.stack(lengths, 0)
+
+
+def collate_fn(batch):
+    read_ids, ctgs, poss, signals, bases, r_pos_enc, q_pos_enc = zip(*batch)
+
+    num_blocks = torch.tensor([len(s) for s in signals])  # B
+    signals = pad_sequence(signals,
+                           batch_first=True)  # [B, MAX_LEN, BLOCK_SIZE]
+    r_pos_enc = pad_sequence(r_pos_enc, batch_first=True)  # [B, MAX_LEN, E//4]
+    q_pos_enc = pad_sequence(q_pos_enc, batch_first=True)  # [B, MAX_LEN, E//4]
+
+    return read_ids, ctgs, poss, signals, torch.stack(
+        bases, 0), r_pos_enc, q_pos_enc, num_blocks
 
 
 def worker_init_fn(worker_id: int) -> None:
@@ -66,11 +89,7 @@ def worker_init_fn(worker_id: int) -> None:
 
 @torch.no_grad()
 def inference(args):
-    model = Rockfish.load_from_checkpoint(args.ckpt_path)
-    model.eval()
-    model.freeze()
-
-    torch.backends.cudnn.benchmark = False
+    model = Rockfish.load_from_checkpoint(args.ckpt_path).eval()
 
     gpus = parse_gpus(args.gpus) if args.gpus is not None else None
     if gpus is not None and torch.cuda.is_available():
@@ -81,7 +100,11 @@ def inference(args):
         device = torch.device('cpu')
     model.to(device)
 
-    data = RFDataset(args.data_path)
+    data = RFDataset(args.data_path, 384, 31, 5)
+    if args.workers == 0:
+        data.fd = open(data.path, 'rb')
+        data.ctgs = parse_ctgs(data.fd)
+
     loader = DataLoader(data,
                         args.batch,
                         False,
@@ -90,18 +113,33 @@ def inference(args):
                         worker_init_fn=worker_init_fn,
                         pin_memory=True)
 
-    with open(args.output, 'w') as f, tqdm(total=len(data)) as pbar, torch.cuda.amp.autocast():
-        for ids, ctgs, poss, signals, bases, q_indices, lens in loader:
-            signals, bases, q_indices, lens = (signals.to(device),
-                                               bases.to(device),
-                                               q_indices.to(device),
-                                               lens.to(device))
+    with open(
+            args.output, 'w'
+    ) as f, tqdm(total=len(data)) as pbar, torch.profiler.profile(
+            schedule=torch.profiler.schedule(wait=3,
+                                             warmup=3,
+                                             active=10,
+                                             repeat=2),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                '/raid-ssd/stanojevicd/dna-mod/NA12878/no_tombo/log/rockfish'),
+            record_shapes=True,
+            with_stack=True) as prof:
+        for i, (ids, ctgs, poss, signals, bases, r_pos_enc, q_pos_enc,
+                num_blocks) in enumerate(loader):
+            if i >= (3 + 3 + 10) * 2:
+                break
 
-            logits = model(signals, lens, bases, q_indices).cpu().numpy()  # N
+            signals, bases, r_pos_enc, q_pos_enc, num_blocks = (
+                signals.to(device), bases.to(device), r_pos_enc.to(device),
+                q_pos_enc.to(device), num_blocks.to(device))
+
+            logits = model(signals, bases, r_pos_enc, q_pos_enc,
+                           num_blocks).cpu().numpy()  # N
 
             for id, ctg, pos, logit in zip(ids, ctgs, poss, logits):
                 print(id, ctg, pos, logit, file=f, sep='\t')
             pbar.update(len(logits))
+            prof.step()
 
 
 def get_arguments():

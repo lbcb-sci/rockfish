@@ -34,8 +34,6 @@ class RockfishEncoder(nn.Module):
                  dropout: float) -> None:
         super().__init__()
 
-        # self.signal_norm = nn.LayerNorm(embed_dim)
-
         self.blocks = nn.ModuleList([
             RockfishLayer(embed_dim, nhead, dim_ff, dropout)
             for _ in range(n_layers)
@@ -43,8 +41,6 @@ class RockfishEncoder(nn.Module):
 
     def forward(self, signal: Tensor, bases: Tensor,
                 mask: Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]:
-        # norm_signal = self.signal_norm(signal)
-
         for block in self.blocks:
             signal, bases = block(signal, bases, mask)
 
