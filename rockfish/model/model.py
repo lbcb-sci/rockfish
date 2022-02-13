@@ -64,7 +64,7 @@ class Rockfish(pl.LightningModule):
         self.val_ap = AveragePrecision()
 
     def create_padding_mask(self, num_blocks, blocks_len):
-        repeats = torch.arange(0, blocks_len, device=self.device)  # S
+        repeats = torch.arange(0, blocks_len, device=num_blocks.device)  # S
         repeats = repeats.expand(num_blocks.size(0), -1)  # BxS
 
         return repeats >= num_blocks.unsqueeze(-1)
