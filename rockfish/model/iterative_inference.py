@@ -112,6 +112,7 @@ def inference(args):
             model = DataParallel(model, device_ids=gpus)
     else:
         device = torch.device('cpu')
+    print(device)
     model.to(device)
 
     data = RFDataset(args.data_path)
@@ -124,7 +125,7 @@ def inference(args):
                         pin_memory=True)
 
     with open(args.output, 'w') as f, tqdm(
-            total=len(data)) as pbar, torch.cuda.amp.autocast():
+            total=len(data.offsets)) as pbar, torch.cuda.amp.autocast():
         for ids, ctgs, poss, signals, bases, r_pos_enc, q_indices, num_blocks in loader:
             signals, bases, r_pos_enc, q_indices, num_blocks = (
                 signals.to(device), bases.to(device), r_pos_enc.to(device),
