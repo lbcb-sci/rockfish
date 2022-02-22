@@ -1,12 +1,12 @@
-from dataclasses import dataclass
-from io import BufferedReader
+import numpy as np
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset, DataLoader
-import math
 
 import pytorch_lightning as pl
 
+from dataclasses import dataclass
+from io import BufferedReader
 import struct
 import sys
 
@@ -74,7 +74,7 @@ class Example:
     read_id: str
     ctg: int
     pos: int
-    signal: List[float]
+    signal: np.ndarray
     q_indices: List[int]
     lengths: List[int]
     bases: str
