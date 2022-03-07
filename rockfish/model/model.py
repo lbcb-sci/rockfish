@@ -20,7 +20,7 @@ class Rockfish(pl.LightningModule):
                  features: int = 384,
                  bases_len: int = 31,
                  nhead: int = 6,
-                 dim_ff: int = 1536,
+                 dim_ff: Optional[int] = None,
                  n_layers: int = 12,
                  pos_dropout: float = 0.1,
                  attn_dropout: float = 0.1,
@@ -30,8 +30,13 @@ class Rockfish(pl.LightningModule):
                  codebook_size: int = 64,
                  bases_mask_prob: float = 0.15,
                  bases_rand_mask_prob: float = 0.10,
-                 block_size: int = 5) -> None:
+                 block_size: int = 5,
+                 alpha: float = 0.1) -> None:
         super(Rockfish, self).__init__()
+
+        if dim_ff is None:
+            dim_ff = 4 * features
+
         self.save_hyperparameters()
 
         self.central_base = bases_len // 2
@@ -41,12 +46,15 @@ class Rockfish(pl.LightningModule):
         self.block_size = block_size
 
         self.signal_embedding = nn.Linear(5, features)
-        self.codebook = nn.Linear(features, codebook_size, bias=False)
+
+        if self.signal_mask_prob > 1e-6:
+            self.codebook = nn.Linear(features, codebook_size, bias=False)
+
         self.signal_pe = SignalPositionalEncoding(features)
         # self.signal_dropout = nn.Dropout(pos_dropout)
 
         # self.embedding_dropout = nn.Dropout(p=pos_dropout)
-        self.ref_embedding = nn.Embedding(5, features)  # removed max_norm=1
+        self.ref_embedding = nn.Embedding(5, features)
         self.ref_pe = PositionalEncoding(features, pos_dropout, bases_len)
 
         encoder_layer = nn.TransformerEncoderLayer(features,
@@ -66,7 +74,7 @@ class Rockfish(pl.LightningModule):
                                                    F.gelu,
                                                    batch_first=True,
                                                    norm_first=True)
-        self.decoder = nn.TransformerDecoder(decoder_layer, 4)
+        self.decoder = nn.TransformerDecoder(decoder_layer, n_layers)
         '''self.encoder = RockfishEncoder(features, nhead, dim_ff, n_layers,
                                        attn_dropout)'''
 
@@ -146,7 +154,11 @@ class Rockfish(pl.LightningModule):
         B, S, _ = signal.shape
 
         signal = self.signal_embedding(signal)  # BxSxE
-        signal_code_logits, masks = self.mask_signal(signal, num_blocks)
+
+        signal_code_logits, masks = None, None
+        if self.signal_mask_prob > 1e-6:
+            signal_code_logits, masks = self.mask_signal(signal, num_blocks)
+
         signal = self.signal_pe(signal, r_pos_enc, q_pos_enc, masks)
         # signal = self.signal_dropout(signal)
 
@@ -162,7 +174,9 @@ class Rockfish(pl.LightningModule):
         #bases = self.decoder(signal, bases, padding_mask)
         # signal, bases = self.encoder(signal, bases, padding_mask)
 
-        context_code_logits = self.get_context_code_probs(signal, masks)
+        context_code_logits = None
+        if self.signal_mask_prob > 1e-6:
+            context_code_logits = self.get_context_code_probs(signal, masks)
 
         bases = self.layer_norm(bases)  # BxTxE
         x = bases[:, self.central_base]
@@ -210,6 +224,17 @@ class Rockfish(pl.LightningModule):
 
         return bases, mask, target_bases
 
+    def signal_masking_losses(
+        self, signal_code_logits: torch.Tensor,
+        context_code_logits: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        signal_mask_targets = signal_code_logits.argmax(dim=-1)
+        signal_mask_loss = F.cross_entropy(context_code_logits,
+                                           signal_mask_targets)
+        diversity_loss = self.get_diversity_loss(signal_code_logits)
+
+        return signal_mask_loss, diversity_loss, signal_mask_targets
+
     def training_step(self, batch, batch_idx):
         signals, bases, r_pos_enc, q_pos_enc, num_blocks, labels = batch
         bases, bases_mask, target_bases = self.bases_masking(bases)
@@ -222,31 +247,35 @@ class Rockfish(pl.LightningModule):
             num_blocks,
             bases_mask=bases_mask)
 
-        signal_mask_targets = signal_code_logits.argmax(dim=-1)
-        signal_mask_loss = F.cross_entropy(context_code_logits,
-                                           signal_mask_targets)
-        diversity_loss = self.get_diversity_loss(signal_code_logits)
-
         mod_loss = F.binary_cross_entropy_with_logits(mod_logits,
                                                       labels.float())
-        mask_loss = F.cross_entropy(mask_logits, target_bases)
-        loss = mod_loss + 0.1 * (mask_loss + signal_mask_loss) + diversity_loss
 
-        self.log('train_signal_mask_loss', signal_mask_loss)
-        self.log('train_diversity_loss', diversity_loss)
+        loss = mod_loss
         self.log('train_mod_loss', mod_loss)
-        self.log('train_mask_loss', mask_loss)
-        self.log('train_loss', loss)
-
         self.log('train_mod_acc',
                  self.train_mod_acc(mod_logits, (labels > 0.5).int()))
-        self.log('train_mask_acc',
-                 self.train_mask_acc(mask_logits, target_bases))
-        self.log(
-            'train_signal_mask_acc',
-            self.train_signal_mask_acc(context_code_logits,
-                                       signal_mask_targets))
 
+        if mask_logits is not None:
+            mask_loss = F.cross_entropy(mask_logits, target_bases)
+            loss += self.hparams.alpha * mask_loss
+
+            self.log('train_mask_loss', mask_loss)
+            self.log('train_mask_acc',
+                     self.train_mask_acc(mask_logits, target_bases))
+
+        if signal_code_logits is not None:
+            signal_mask_loss, diversity_loss, signal_mask_targets = self.signal_masking_losses(
+                signal_code_logits, context_code_logits)
+            loss += self.hparams.alpha * signal_mask_loss + diversity_loss
+
+            self.log('train_signal_mask_loss', signal_mask_loss)
+            self.log('train_diversity_loss', diversity_loss)
+            self.log(
+                'train_signal_mask_acc',
+                self.train_signal_mask_acc(context_code_logits,
+                                           signal_mask_targets))
+
+        self.log('train_loss', loss)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -278,7 +307,7 @@ def get_trainer_defaults() -> Dict[str, Any]:
 
 class RockfishLightningCLI(LightningCLI):
     def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
-        parser.link_arguments('model.bases_len', 'data.seq_len')
+        parser.link_arguments('model.bases_len', 'data.ref_len')
         parser.link_arguments('model.block_size', 'data.block_size')
 
 
