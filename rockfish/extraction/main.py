@@ -1,12 +1,14 @@
+from contextlib import ExitStack
 from ont_fast5_api.fast5_interface import get_fast5_file
 from ont_fast5_api.fast5_read import Fast5Read
 from tqdm import tqdm
 import mappy
 
+import sys
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing as mp
 import argparse
-import logging
+import traceback
 
 from typing import *
 
@@ -14,6 +16,10 @@ from fast5 import load_read
 from alignment import get_aligner
 from extract import Example, extract_features, MotifPositions, build_reference_idx
 from writer import BinaryWriter
+
+root = Path(__file__).resolve().parents[1] / 'rftools'
+sys.path.append(str(root))
+from merge import merge
 
 
 def get_files(path: Path, recursive: bool = False) -> Iterator[Path]:
@@ -34,40 +40,33 @@ def get_reads(path: Path) -> Generator[Fast5Read, None, None]:
         yield from f5.get_reads()
 
 
-def worker_init(aligner_: mappy.Aligner, ref_positions_: MotifPositions,
-                window_: int, mapq_filter_: bool):
-    global aligner, ref_positions, window, mapq_filter
+def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
+                   window: int, mapq_filter: bool, dest_path: Path,
+                   in_queue: mp.Queue, out_queue: mp.Queue) -> None:
+    with BinaryWriter(dest_path, ref_positions.keys(),
+                      2 * window + 1) as writer:
+        writer.write_header()
 
-    aligner = aligner_
-    ref_positions = ref_positions_
-    window = window_
-    mapq_filter = mapq_filter_
+        while (path := in_queue.get()) is not None:
+            for read in get_reads(path):
+                try:
+                    read_info = load_read(read)
+                    examples = extract_features(read_info, ref_positions,
+                                                aligner, window, mapq_filter)
 
+                    if examples is not None:
+                        writer.write_examples(examples)
+                except:
+                    print(
+                        f'Exception occured for read: {read_info.read_id} in file {path}',
+                        file=sys.stderr)
 
-def process_worker(path: Path) -> List[Example]:
-    all_examples = []
-    for read in get_reads(path):
-        try:
-            read_info = load_read(read)
-            examples = extract_features(read_info, ref_positions, aligner,
-                                        window, mapq_filter)
+            out_queue.put(path)
 
-            if examples is not None:
-                all_examples.extend(examples)
-            logging.info(
-                f'Successfully generated examples for read: {read_info.read_id}'
-            )
-        except:
-            logging.exception(
-                f'Exception occured for read: {read_info.read_id}')
-
-    return all_examples
+        writer.write_n_examples()
 
 
 def main(args: argparse.Namespace) -> None:
-    logging.basicConfig(filename='log.txt', level=logging.INFO)
-    logging.info('Logging started')
-
     tqdm.write(f'Parsing reference file {args.reference}')
     aligner = get_aligner(args.reference)
 
@@ -76,23 +75,40 @@ def main(args: argparse.Namespace) -> None:
 
     tqdm.write(
         f'Retrieving files from {args.source}, recursive {args.recursive}')
-    files = get_files(args.source, args.recursive)
+    files = list(get_files(args.source, args.recursive))
 
-    tqdm.write('Sumbitting jobs.')
-    with ProcessPoolExecutor(max_workers=args.workers,
-                             initializer=worker_init,
-                             initargs=(aligner, ref_positions, args.window,
-                                       args.mapq_filter)) as pool:
-        futures = [pool.submit(process_worker, p) for p in files]
+    in_queue = mp.Queue()
+    out_queue = mp.Queue()
 
-        with BinaryWriter(args.dest, ref_positions.keys(),
-                          2 * args.window + 1) as writer:
-            writer.write_header()
+    n_workers = min(args.workers, len(files))
+    workers = [None] * n_workers
+    writers_path = [None] * n_workers
+    for i in range(n_workers):
+        writers_path[i] = args.dest.parent / (args.dest.name + f'.{i}.tmp')
+        workers[i] = mp.Process(target=process_worker,
+                                args=(aligner, ref_positions, args.window,
+                                      args.mapq_filter, writers_path[i],
+                                      in_queue, out_queue),
+                                daemon=True)
+        workers[i].start()
 
-            for future in tqdm(as_completed(futures), total=len(futures)):
-                writer.write_examples(future.result())
+    tqdm.write('Processing started.')
+    for p in files:
+        in_queue.put(p)
+    for _ in range(n_workers):
+        in_queue.put(None)
 
-            writer.write_n_examples()
+    pbar = tqdm(total=len(files))
+    while pbar.n < len(files):
+        _ = out_queue.get()
+        pbar.update()
+
+    for w in workers:  # All workers should finish soon
+        w.join()
+
+    merge(writers_path, args.dest, 2 * args.window + 1)
+    for p in writers_path:  # Removing tmp files
+        p.unlink()
 
 
 def get_arguments() -> argparse.Namespace:
@@ -107,7 +123,7 @@ def get_arguments() -> argparse.Namespace:
 
     parser.add_argument('-r', '--recursive', action='store_true')
 
-    parser.add_argument('--window', type=int, default=15)
+    parser.add_argument('-w', '--window', type=int, default=15)
     parser.add_argument('-q', '--mapq_filter', action='store_true')
 
     parser.add_argument('-t', '--workers', type=int, default=1)

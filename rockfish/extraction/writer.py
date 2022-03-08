@@ -9,24 +9,22 @@ from extract import Example
 
 
 class BinaryWriter:
+
     def __init__(self, path: Path, ref_names: Set[str], seq_len: int) -> None:
         self.path = path
         self.S = seq_len
 
         self.ref_ids = {n: i for i, n in enumerate(ref_names)}
         self.n_examples = 0
-        self.idx_pointer = 0
 
     def __enter__(self):
         self.fd = self.path.open('wb')
-        self.fd_idx = open(str(self.path) + '.idx', 'wb')
-
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.fd.close()
 
-    def write_example(self, example: Example) -> None:
+    def write_example(self, example: Example) -> bytes:
         ref_id = self.ref_ids[example.ctg]
         n_points = len(example.signal)
         q_indices_len = len(example.q_indices)
@@ -36,16 +34,11 @@ class BinaryWriter:
             str.encode(example.read_id), ref_id, example.pos, n_points,
             q_indices_len, *example.signal, *example.q_indices,
             *example.event_length, str.encode(example.bases))
-
-        self.fd.write(data)
-        self.n_examples += 1
-
-        self.idx_pointer += len(data)
-        self.fd_idx.write(struct.pack('=Q', self.idx_pointer))
+        return data
 
     def write_examples(self, examples: List[Example]) -> None:
-        for example in examples:
-            self.write_example(example)
+        self.fd.write(b''.join([self.write_example(e) for e in examples]))
+        self.n_examples += len(examples)
 
     def write_header(self) -> None:
         n_refs = len(self.ref_ids)
@@ -60,17 +53,7 @@ class BinaryWriter:
 
         self.fd.write(data)
 
-        self.fd_idx.write(struct.pack('=I', 0))  # Number of examples
-
-        self.idx_pointer = len(data)
-        self.fd_idx.write(struct.pack(
-            '=Q', self.idx_pointer))  # Start of the first example
-
     def write_n_examples(self) -> None:
         self.fd.seek(self.header_offset)
         data = struct.pack('=I', self.n_examples)
         self.fd.write(data)
-
-        self.fd_idx.seek(0)
-        data = struct.pack('=I', self.n_examples)
-        self.fd_idx.write(data)
