@@ -76,7 +76,7 @@ def get_event_length(position: int, ref_to_query: np.ndarray,
 
 
 def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
-                     aligner: mappy.Aligner, window: int, mapq_filter: bool,
+                     aligner: mappy.Aligner, window: int, mapq_filter: int,
                      unique_aln: bool) -> List[Example]:
     seq_to_sig = read_info.get_seq_to_sig()
     signal = read_info.get_normalized_signal(end=seq_to_sig[-1]) \

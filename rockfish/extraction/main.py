@@ -42,7 +42,7 @@ def get_reads(path: Path) -> Generator[Fast5Read, None, None]:
 
 
 def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
-                   window: int, mapq_filter: bool, unique_aln: bool,
+                   window: int, mapq_filter: int, unique_aln: bool,
                    dest_path: Path, in_queue: mp.Queue,
                    out_queue: mp.Queue) -> None:
     with BinaryWriter(dest_path, ref_positions.keys(),
@@ -134,7 +134,7 @@ def get_arguments() -> argparse.Namespace:
     parser.add_argument('-r', '--recursive', action='store_true')
 
     parser.add_argument('-w', '--window', type=int, default=15)
-    parser.add_argument('-q', '--mapq_filter', action='store_true')
+    parser.add_argument('-q', '--mapq_filter', type=int, default=0)
     parser.add_argument('-u', '--unique', action='store_true')
 
     parser.add_argument('-t', '--workers', type=int, default=1)
