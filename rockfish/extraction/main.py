@@ -13,7 +13,7 @@ import traceback
 from typing import *
 
 from fast5 import load_read
-from alignment import get_aligner
+from alignment import get_aligner, AlignmentInfo
 from extract import Example, extract_features, MotifPositions, build_reference_idx
 from writer import BinaryWriter
 
@@ -41,8 +41,9 @@ def get_reads(path: Path) -> Generator[Fast5Read, None, None]:
 
 
 def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
-                   window: int, mapq_filter: bool, dest_path: Path,
-                   in_queue: mp.Queue, out_queue: mp.Queue) -> None:
+                   window: int, mapq_filter: bool, unique_aln: bool,
+                   dest_path: Path, in_queue: mp.Queue,
+                   out_queue: mp.Queue) -> None:
     with BinaryWriter(dest_path, ref_positions.keys(),
                       2 * window + 1) as writer:
         writer.write_header()
@@ -51,8 +52,9 @@ def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
             for read in get_reads(path):
                 try:
                     read_info = load_read(read)
-                    examples = extract_features(read_info, ref_positions,
-                                                aligner, window, mapq_filter)
+                    status, examples = extract_features(
+                        read_info, ref_positions, aligner, window, mapq_filter,
+                        unique_aln)
 
                     if examples is not None:
                         writer.write_examples(examples)
@@ -61,7 +63,7 @@ def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
                         f'Exception occured for read: {read_info.read_id} in file {path}',
                         file=sys.stderr)
 
-            out_queue.put(path)
+            out_queue.put(status)
 
         writer.write_n_examples()
 
@@ -87,8 +89,8 @@ def main(args: argparse.Namespace) -> None:
         writers_path[i] = args.dest.parent / (args.dest.name + f'.{i}.tmp')
         workers[i] = mp.Process(target=process_worker,
                                 args=(aligner, ref_positions, args.window,
-                                      args.mapq_filter, writers_path[i],
-                                      in_queue, out_queue),
+                                      args.mapq_filter, args.unique,
+                                      writers_path[i], in_queue, out_queue),
                                 daemon=True)
         workers[i].start()
 
@@ -99,8 +101,12 @@ def main(args: argparse.Namespace) -> None:
         in_queue.put(None)
 
     pbar = tqdm(total=len(files))
+    status_count = {e.name: 0 for e in AlignmentInfo}
     while pbar.n < len(files):
-        _ = out_queue.get()
+        status = out_queue.get()
+        status_count[status.name] += 1
+
+        pbar.set_postfix(status_count, refresh=False)
         pbar.update()
 
     for w in workers:  # All workers should finish soon
@@ -125,6 +131,7 @@ def get_arguments() -> argparse.Namespace:
 
     parser.add_argument('-w', '--window', type=int, default=15)
     parser.add_argument('-q', '--mapq_filter', action='store_true')
+    parser.add_argument('-u', '--unique', action='store_true')
 
     parser.add_argument('-t', '--workers', type=int, default=1)
 

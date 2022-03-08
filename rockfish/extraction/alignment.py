@@ -1,6 +1,8 @@
+from sre_constants import SUCCESS
 import mappy
 import numpy as np
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 import sys
 
@@ -8,7 +10,7 @@ from typing import *
 
 
 @dataclass
-class AlignmentInfo:
+class AlignmentData:
     ctg: str
     r_start: int
     r_end: int
@@ -16,15 +18,25 @@ class AlignmentInfo:
     ref_to_query: np.ndarray
 
 
-def align_read(query: str, aligner: mappy.Aligner, mapq_filter: bool,
-               read_id: str) -> Optional[AlignmentInfo]:
+class AlignmentInfo(Enum):
+    SUCCESS = 0,
+    NO_ALIGNMENT = 1,
+    UNIQUE_FAIL = 2,
+    MAPQ_FAIL = 3
+
+
+def align_read(query: str, aligner: mappy.Aligner, mapq_filter: int,
+               unique_filter: bool,
+               read_id: str) -> Tuple[AlignmentInfo, Optional[AlignmentData]]:
     alignments = list(aligner.map(query))
     if not alignments:
-        return None
+        return (AlignmentInfo.NO_ALIGNMENT, None)
+    if unique_filter and len(alignments) > 1:
+        return (AlignmentInfo.UNIQUE_FAIL, None)
 
     alignment = alignments[0]
-    if mapq_filter and alignment.mapq < 60:
-        return None
+    if alignment.mapq < mapq_filter:
+        return (AlignmentInfo.MAPQ_FAIL, None)
 
     ref_len = alignment.r_en - alignment.r_st
     cigar = alignment.cigar if alignment.strand == 1 else reversed(
@@ -51,8 +63,9 @@ def align_read(query: str, aligner: mappy.Aligner, mapq_filter: bool,
             f'Warning: Mismatch between reference ({ref_len}) and cigar ({rpos}) length in query: {read_id}',
             file=sys.stderr)
 
-    return AlignmentInfo(alignment.ctg, alignment.r_st, alignment.r_en,
+    data = AlignmentData(alignment.ctg, alignment.r_st, alignment.r_en,
                          alignment.strand == 1, ref_to_query)
+    return (AlignmentInfo.SUCCESS, data)
 
 
 def get_aligner(reference_path: Path) -> mappy.Aligner:
