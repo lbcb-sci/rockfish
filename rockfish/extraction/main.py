@@ -1,4 +1,3 @@
-from contextlib import ExitStack
 from ont_fast5_api.fast5_interface import get_fast5_file
 from ont_fast5_api.fast5_read import Fast5Read
 from tqdm import tqdm
@@ -9,13 +8,12 @@ from pathlib import Path
 from collections import Counter
 import multiprocessing as mp
 import argparse
-import traceback
 
 from typing import *
 
 from fast5 import load_read
 from alignment import get_aligner, AlignmentInfo
-from extract import Example, extract_features, MotifPositions, build_reference_idx
+from extract import extract_features, MotifPositions, build_reference_idx
 from writer import BinaryWriter
 
 root = Path(__file__).resolve().parents[1] / 'rftools'

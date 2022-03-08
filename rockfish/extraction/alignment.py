@@ -30,13 +30,13 @@ def align_read(query: str, aligner: mappy.Aligner, mapq_filter: int,
                read_id: str) -> Tuple[AlignmentInfo, Optional[AlignmentData]]:
     alignments = list(aligner.map(query))
     if not alignments:
-        return (AlignmentInfo.NO_ALIGNMENT, None)
+        return AlignmentInfo.NO_ALIGNMENT, None
     if unique_filter and len(alignments) > 1:
-        return (AlignmentInfo.UNIQUE_FAIL, None)
+        return AlignmentInfo.UNIQUE_FAIL, None
 
     alignment = alignments[0]
     if alignment.mapq < mapq_filter:
-        return (AlignmentInfo.MAPQ_FAIL, None)
+        return AlignmentInfo.MAPQ_FAIL, None
 
     ref_len = alignment.r_en - alignment.r_st
     cigar = alignment.cigar if alignment.strand == 1 else reversed(
@@ -65,7 +65,7 @@ def align_read(query: str, aligner: mappy.Aligner, mapq_filter: int,
 
     data = AlignmentData(alignment.ctg, alignment.r_st, alignment.r_en,
                          alignment.strand == 1, ref_to_query)
-    return (AlignmentInfo.SUCCESS, data)
+    return AlignmentInfo.SUCCESS, data
 
 
 def get_aligner(reference_path: Path) -> mappy.Aligner:
