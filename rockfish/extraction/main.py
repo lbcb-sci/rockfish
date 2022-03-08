@@ -6,6 +6,7 @@ import mappy
 
 import sys
 from pathlib import Path
+from collections import Counter
 import multiprocessing as mp
 import argparse
 import traceback
@@ -49,6 +50,7 @@ def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
         writer.write_header()
 
         while (path := in_queue.get()) is not None:
+            status_count = Counter({e.name: 0 for e in AlignmentInfo})
             for read in get_reads(path):
                 try:
                     read_info = load_read(read)
@@ -58,12 +60,14 @@ def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
 
                     if examples is not None:
                         writer.write_examples(examples)
+
+                    status_count[status.name] += 1  # Update status
                 except:
                     print(
                         f'Exception occured for read: {read_info.read_id} in file {path}',
                         file=sys.stderr)
 
-            out_queue.put(status)
+            out_queue.put(status_count)
 
         writer.write_n_examples()
 
@@ -101,10 +105,10 @@ def main(args: argparse.Namespace) -> None:
         in_queue.put(None)
 
     pbar = tqdm(total=len(files))
-    status_count = {e.name: 0 for e in AlignmentInfo}
+    status_count = Counter({e.name: 0 for e in AlignmentInfo})
     while pbar.n < len(files):
         status = out_queue.get()
-        status_count[status.name] += 1
+        status_count += status
 
         pbar.set_postfix(status_count, refresh=False)
         pbar.update()
