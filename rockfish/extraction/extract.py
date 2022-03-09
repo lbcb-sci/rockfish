@@ -17,10 +17,11 @@ class Example:
     read_id: str
     ctg: str
     pos: int
-    signal: List[float]
+    signal: np.ndarray
     event_length: List[int]
     bases: str
-    q_indices: List[int]
+    q_indices: np.ndarray
+    q_bases: str
 
 
 def build_reference_idx(aligner: mappy.Aligner, motif: str,
@@ -111,8 +112,8 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
 
         move_start = (sig_start - seq_to_sig[0]) // read_info.block_stride
         move_end = (sig_end - seq_to_sig[0]) // read_info.block_stride
-        q_indices = (read_info.move_table[move_start:move_end].cumsum() -
-                     1).tolist()
+        q_indices = read_info.move_table[move_start:move_end].cumsum() - 1
+        assert q_indices[-1] == len(query[q_start:q_end]) - 1
 
         event_lengts = [
             event_len_fn(p) for p in range(rel - window, rel + window + 1)
@@ -120,7 +121,8 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
 
         example = Example(read_info.read_id, aln_data.ctg, pos,
                           signal[sig_start:sig_end], event_lengts,
-                          ref_seq[rel - window:rel + window + 1], q_indices)
+                          ref_seq[rel - window:rel + window + 1], q_indices,
+                          query[q_start:q_end])
         examples.append(example)
 
     return status, examples

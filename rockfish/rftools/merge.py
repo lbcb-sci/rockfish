@@ -10,6 +10,8 @@ import argparse
 
 from typing import *
 
+EXAMPLE_HEADER_BYTES = 48
+
 
 @dataclass
 class RFHeader:
@@ -81,10 +83,10 @@ def merge(src: List[str], dest: str, seq_len: int) -> None:
                 rf_src.seek(header.start_offset)
 
                 for _ in range(header.n_examples):
-                    example_info = rf_src.read(46)
-                    _, _, _, n_points, q_indices_len = struct.unpack(
-                        '=36sHIHH', example_info)
-                    n_bytes = 2 * n_points + 2 * q_indices_len + 3 * seq_len
+                    example_info = rf_src.read(EXAMPLE_HEADER_BYTES)
+                    _, _, _, n_points, q_indices_len, q_bases_len = struct.unpack(
+                        '=36sHIHHH', example_info)
+                    n_bytes = 2 * n_points + 2 * q_indices_len + 3 * seq_len + q_bases_len
                     example_data = rf_src.read(n_bytes)
 
                     rf_dest.write(example_info + example_data)
