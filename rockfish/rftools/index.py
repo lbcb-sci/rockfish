@@ -37,12 +37,12 @@ def index(rf_path: Path, index_path: Optional[Path], seq_len: int) -> None:
                 index_fd.write(
                     example_idx.to_bytes(8, sys.byteorder, signed=False))
 
-                _, _, _, n_points, q_indices_len = struct.unpack(
-                    '=36sHIHH', data.read(46))
-                n_bytes = 2 * n_points + 2 * q_indices_len + 3 * seq_len
+                _, _, _, n_points, q_indices_len, q_bases_len = struct.unpack(
+                    '=36sHIHHH', data.read(48))
+                n_bytes = 2 * n_points + 2 * q_indices_len + 3 * seq_len + q_bases_len
                 data.read(n_bytes)
 
-                example_idx += 46 + n_bytes
+                example_idx += 48 + n_bytes
 
     tqdm.write(f'Finished index generation.')
 
