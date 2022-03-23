@@ -14,6 +14,7 @@ import math
 from typing import *
 
 ENCODING = {b: i for i, b in enumerate('ACGT')}
+Q_BASE_PADDING = 5
 
 
 class Labels:
@@ -84,7 +85,7 @@ class Example:
     signal: np.ndarray
     q_indices: List[int]
     lengths: List[int]
-    bases: str
+    r_bases: str
 
 
 def read_example(fd: BufferedReader,
@@ -93,21 +94,22 @@ def read_example(fd: BufferedReader,
     if offset is not None:
         fd.seek(offset)
 
-    read_id, ctg, pos, n_points, q_indices_len = struct.unpack(
-        '=36sHIHH', fd.read(46))
+    read_id, ctg, pos, n_points, q_indices_len, q_bases_len = struct.unpack(
+        '=36sHIHHH', fd.read(48))
 
-    n_bytes = 2 * n_points + 2 * q_indices_len + 3 * ref_len
-    data = struct.unpack(f'={n_points}e{q_indices_len}H{ref_len}H{ref_len}s',
-                         fd.read(n_bytes))
+    n_bytes = 2 * n_points + 2 * q_indices_len + 3 * ref_len + q_bases_len
+    data = struct.unpack(
+        f'={n_points}e{q_indices_len}H{ref_len}H{ref_len}s{q_bases_len}s',
+        fd.read(n_bytes))
     event_len_start = n_points + q_indices_len
 
     signal = np.array(data[:n_points], dtype=np.half)
     q_indices = data[n_points:event_len_start]
-    lengths = data[event_len_start:-1]
-    bases = data[-1].decode()
+    lengths = data[event_len_start:-2]
+    r_bases = data[-2].decode()
 
     return Example(read_id.decode(), ctg, pos, signal, q_indices, lengths,
-                   bases)
+                   r_bases)
 
 
 class ReferenceMapping:
@@ -150,7 +152,7 @@ class RFTrainDataset(Dataset):
         signal = torch.tensor(example.signal).unfold(
             -1, self.block_size, self.block_size)  # Converting to blocks
 
-        bases = torch.tensor([ENCODING[b] for b in example.bases])
+        r_bases = torch.tensor([ENCODING[b] for b in example.r_bases])
         lengths = torch.tensor(example.lengths)
 
         ref_mapping = self.reference_mapping(lengths)
@@ -159,7 +161,7 @@ class RFTrainDataset(Dataset):
         label = self.labels.get_label(example.read_id, self.ctgs[example.ctg],
                                       example.pos)
 
-        return signal, bases, ref_mapping, q_indices, label
+        return signal, ref_mapping, q_indices, r_bases, label
 
 
 class RFInferenceDataset(IterableDataset):
@@ -250,7 +252,7 @@ class RFInferenceDataset(IterableDataset):
 
 
 def collate_fn_train(batch):
-    signals, bases, ref_mapping, q_pos_enc, labels = zip(*batch)
+    signals, ref_mapping, q_pos_enc, r_bases, labels = zip(*batch)
 
     num_blocks = torch.tensor([len(s) for s in signals])  # B
     signals = pad_sequence(signals,
@@ -258,8 +260,8 @@ def collate_fn_train(batch):
     ref_mapping = pad_sequence(ref_mapping, batch_first=True)  # [B, MAX_LEN]
     q_pos_enc = pad_sequence(q_pos_enc, batch_first=True)  # [B, MAX_LEN]
 
-    return signals, torch.stack(
-        bases, 0), ref_mapping, q_pos_enc, num_blocks, torch.tensor(labels)
+    return signals, ref_mapping, q_pos_enc, torch.stack(
+        r_bases, 0), num_blocks, torch.tensor(labels)
 
 
 def collate_fn_inference(batch):
