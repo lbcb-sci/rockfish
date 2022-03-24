@@ -8,7 +8,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.utilities.cli import LightningCLI, LightningArgumentParser
 from datasets import RFDataModule
-from layers import GRUDecoder, SignalPositionalEncoding, PositionalEncoding
+from layers import SignalPositionalEncoding, PositionalEncoding, SignalEncoder, AlignmentDecoder
 
 from typing import *
 
@@ -31,7 +31,8 @@ class Rockfish(pl.LightningModule):
                  bases_mask_prob: float = 0.15,
                  bases_rand_mask_prob: float = 0.10,
                  block_size: int = 5,
-                 alpha: float = 0.1) -> None:
+                 alpha: float = 0.1,
+                 track_metrics: bool = True) -> None:
         super(Rockfish, self).__init__()
 
         if dim_ff is None:
@@ -40,57 +41,36 @@ class Rockfish(pl.LightningModule):
         self.save_hyperparameters()
 
         self.central_base = bases_len // 2
-        self.signal_mask_prob = signal_mask_prob
-        self.bases_mask_prob = bases_mask_prob
-        self.bases_rand_mask_prob = bases_rand_mask_prob
         self.block_size = block_size
 
-        self.signal_embedding = nn.Linear(5, features)
+        self.signal_embedding = nn.Linear(self.block_size, features)
 
-        if self.signal_mask_prob > 1e-6:
+        if self.hparams.signal_mask_prob > 1e-6:
             self.codebook = nn.Linear(features, codebook_size, bias=False)
 
         self.signal_pe = SignalPositionalEncoding(features)
-        # self.signal_dropout = nn.Dropout(pos_dropout)
 
-        # self.embedding_dropout = nn.Dropout(p=pos_dropout)
         self.ref_embedding = nn.Embedding(5, features)
         self.ref_pe = PositionalEncoding(features, pos_dropout, bases_len)
 
-        encoder_layer = nn.TransformerEncoderLayer(features,
-                                                   nhead,
-                                                   dim_ff,
-                                                   attn_dropout,
-                                                   F.gelu,
-                                                   batch_first=True,
-                                                   norm_first=True)
-        self.encoder = nn.TransformerEncoder(encoder_layer,
-                                             n_layers,
-                                             norm=nn.LayerNorm(features))
-        decoder_layer = nn.TransformerDecoderLayer(features,
-                                                   nhead,
-                                                   dim_ff,
-                                                   attn_dropout,
-                                                   F.gelu,
-                                                   batch_first=True,
-                                                   norm_first=True)
-        self.decoder = nn.TransformerDecoder(decoder_layer, n_layers)
-        '''self.encoder = RockfishEncoder(features, nhead, dim_ff, n_layers,
-                                       attn_dropout)'''
+        self.signal_encoder = SignalEncoder(features, nhead, dim_ff, n_layers,
+                                            attn_dropout)
+        self.signal_norm = nn.LayerNorm(features)
 
-        # self.decoder = GRUDecoder(features, bases_len)
-        # self.encoder = LightRockfish(features, nhead, dim_ff, attn_dropout, 4)
-        self.layer_norm = nn.LayerNorm(features)
+        self.alignment_decoder = AlignmentDecoder(features, nhead, dim_ff,
+                                                  n_layers, attn_dropout)
+        self.bases_norm = nn.LayerNorm(features)
 
         self.fc_mod = nn.Linear(features, 1)
         self.fc_mask = nn.Linear(features, 4)
 
-        self.train_mod_acc = Accuracy()
-        self.train_mask_acc = Accuracy()
-        self.train_signal_mask_acc = Accuracy()
+        if track_metrics:
+            self.train_mod_acc = Accuracy()
+            self.train_mask_acc = Accuracy()
+            self.train_signal_mask_acc = Accuracy()
 
-        self.val_acc = Accuracy()
-        self.val_ap = AveragePrecision()
+            self.val_acc = Accuracy()
+            self.val_ap = AveragePrecision()
 
     def create_padding_mask(self, num_blocks, blocks_len):
         repeats = torch.arange(0, blocks_len, device=num_blocks.device)  # S
@@ -101,8 +81,9 @@ class Rockfish(pl.LightningModule):
     def mask_signal(self, signal, num_blocks):
         code_logits, masks = [], []
         for i in range(signal.shape[0]):
-            mask = torch.rand(num_blocks[i],
-                              device=self.device) < self.signal_mask_prob
+            mask = torch.rand(
+                num_blocks[i],
+                device=self.device) < self.hparams.signal_mask_prob
             masks.append(mask)
 
             c_logits = self.codebook(signal[i, :num_blocks[i]][mask])  # mxK
@@ -119,36 +100,30 @@ class Rockfish(pl.LightningModule):
 
         return torch.cat(code_logits, dim=0)
 
-    def forward(self, signal, bases, r_pos_enc, q_pos_enc, num_blocks):
+    def forward(self, signal, r_pos_enc, q_pos_enc, bases, num_blocks):
         B, S, _ = signal.shape
 
         signal = self.signal_embedding(signal)  # BxSxE
         signal = self.signal_pe(signal, r_pos_enc, q_pos_enc)
-        # signal = self.embedding_dropout(signal)
 
-        padding_mask = self.create_padding_mask(num_blocks, S)  # BxS_out
+        signal_mask = self.create_padding_mask(num_blocks, S)  # BxS_out
+
+        signal = self.signal_encoder(signal, signal_mask)
+        signal = self.signal_norm(signal)
 
         bases = self.ref_embedding(bases)
         bases = self.ref_pe(bases)
+        bases = self.alignment_decoder(bases, signal, signal_mask)
 
-        # _, bases = self.encoder(signal, bases, padding_mask)
-        signal = self.encoder(signal, src_key_padding_mask=padding_mask)
-        bases = self.decoder(bases,
-                             signal,
-                             memory_key_padding_mask=padding_mask)
-        # bases = self.decoder(signal, bases, padding_mask)
-
-        x = self.layer_norm(bases[:, self.central_base])
-        #bases = self.layer_norm(bases)  # BxTxE
-        #x = bases[:, self.central_base]
+        x = self.bases_norm(bases[:, self.central_base])
 
         return self.fc_mod(x).squeeze(-1)  # BxE -> B
 
     def forward_train(self,
                       signal,
-                      bases,
                       r_pos_enc,
                       q_pos_enc,
+                      bases,
                       num_blocks,
                       bases_mask=None):
         B, S, _ = signal.shape
@@ -156,29 +131,25 @@ class Rockfish(pl.LightningModule):
         signal = self.signal_embedding(signal)  # BxSxE
 
         signal_code_logits, masks = None, None
-        if self.signal_mask_prob > 1e-6:
+        if self.hparams.signal_mask_prob > 1e-6:
             signal_code_logits, masks = self.mask_signal(signal, num_blocks)
 
         signal = self.signal_pe(signal, r_pos_enc, q_pos_enc, masks)
-        # signal = self.signal_dropout(signal)
 
-        padding_mask = self.create_padding_mask(num_blocks, S)  # BxS_out
+        signal_mask = self.create_padding_mask(num_blocks, S)  # BxS_out
+
+        signal = self.signal_encoder(signal, signal_mask)
+        signal = self.signal_norm(signal)
 
         bases = self.ref_embedding(bases)
         bases = self.ref_pe(bases)
-
-        signal = self.encoder(signal, src_key_padding_mask=padding_mask)
-        bases = self.decoder(bases,
-                             signal,
-                             memory_key_padding_mask=padding_mask)
-        #bases = self.decoder(signal, bases, padding_mask)
-        # signal, bases = self.encoder(signal, bases, padding_mask)
+        bases = self.alignment_decoder(bases, signal, signal_mask)
 
         context_code_logits = None
-        if self.signal_mask_prob > 1e-6:
+        if self.hparams.signal_mask_prob > 1e-6:
             context_code_logits = self.get_context_code_probs(signal, masks)
 
-        bases = self.layer_norm(bases)  # BxTxE
+        bases = self.bases_norm(bases)  # BxTxE
         x = bases[:, self.central_base]
 
         mod_logits = self.fc_mod(x).squeeze(-1)  # BxE -> B
@@ -213,8 +184,8 @@ class Rockfish(pl.LightningModule):
 
     def bases_masking(self, bases):
         probs = torch.rand(*bases.shape, device=bases.device)
-        mask = probs < self.bases_mask_prob
-        rand_mask = probs < self.bases_rand_mask_prob
+        mask = (probs < self.hparams.bases_mask_prob)
+        rand_mask = (probs < self.hparams.bases_rand_mask_prob)
 
         target_bases = bases[mask].clone()
         bases[mask & ~rand_mask] = MASK_CLS_LABEL
@@ -236,14 +207,16 @@ class Rockfish(pl.LightningModule):
         return signal_mask_loss, diversity_loss, signal_mask_targets
 
     def training_step(self, batch, batch_idx):
-        signals, bases, r_pos_enc, q_pos_enc, num_blocks, labels = batch
+        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels = batch
+
+        # q_bases, q_bases_mask, q_target_bases = self.bases_masking(q_bases)
         bases, bases_mask, target_bases = self.bases_masking(bases)
 
         mod_logits, mask_logits, signal_code_logits, context_code_logits = self.forward_train(
             signals,
-            bases,
             r_pos_enc,
             q_pos_enc,
+            bases,
             num_blocks,
             bases_mask=bases_mask)
 
@@ -279,9 +252,9 @@ class Rockfish(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        signals, bases, r_pos_enc, q_pos_enc, num_blocks, labels = batch
+        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels = batch
 
-        logits = self(signals, bases, r_pos_enc, q_pos_enc, num_blocks)
+        logits = self(signals, r_pos_enc, q_pos_enc, bases, num_blocks)
         loss = F.binary_cross_entropy_with_logits(logits, labels.float())
 
         self.log('val_loss', loss, prog_bar=True)
@@ -315,7 +288,8 @@ def cli_main():
     RockfishLightningCLI(
         Rockfish,
         RFDataModule,
-        seed_everything_default=42,  # 42 for first training, 43 self-distilation
+        seed_everything_default=
+        1991,  # 42 for first training, 43 self-distilation
         save_config_overwrite=True,
         trainer_defaults=get_trainer_defaults())
 

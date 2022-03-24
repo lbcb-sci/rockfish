@@ -85,7 +85,7 @@ class Example:
     signal: np.ndarray
     q_indices: List[int]
     lengths: List[int]
-    r_bases: str
+    bases: str
 
 
 def read_example(fd: BufferedReader,
@@ -106,10 +106,10 @@ def read_example(fd: BufferedReader,
     signal = np.array(data[:n_points], dtype=np.half)
     q_indices = data[n_points:event_len_start]
     lengths = data[event_len_start:-2]
-    r_bases = data[-2].decode()
+    bases = data[-2].decode()
 
     return Example(read_id.decode(), ctg, pos, signal, q_indices, lengths,
-                   r_bases)
+                   bases)
 
 
 class ReferenceMapping:
@@ -152,7 +152,7 @@ class RFTrainDataset(Dataset):
         signal = torch.tensor(example.signal).unfold(
             -1, self.block_size, self.block_size)  # Converting to blocks
 
-        r_bases = torch.tensor([ENCODING[b] for b in example.r_bases])
+        bases = torch.tensor([ENCODING[b] for b in example.bases])
         lengths = torch.tensor(example.lengths)
 
         ref_mapping = self.reference_mapping(lengths)
@@ -161,7 +161,7 @@ class RFTrainDataset(Dataset):
         label = self.labels.get_label(example.read_id, self.ctgs[example.ctg],
                                       example.pos)
 
-        return signal, ref_mapping, q_indices, r_bases, label
+        return signal, ref_mapping, q_indices, bases, label
 
 
 class RFInferenceDataset(IterableDataset):
@@ -252,7 +252,7 @@ class RFInferenceDataset(IterableDataset):
 
 
 def collate_fn_train(batch):
-    signals, ref_mapping, q_pos_enc, r_bases, labels = zip(*batch)
+    signals, ref_mapping, q_pos_enc, bases, labels = zip(*batch)
 
     num_blocks = torch.tensor([len(s) for s in signals])  # B
     signals = pad_sequence(signals,
@@ -261,7 +261,7 @@ def collate_fn_train(batch):
     q_pos_enc = pad_sequence(q_pos_enc, batch_first=True)  # [B, MAX_LEN]
 
     return signals, ref_mapping, q_pos_enc, torch.stack(
-        r_bases, 0), num_blocks, torch.tensor(labels)
+        bases, 0), num_blocks, torch.tensor(labels)
 
 
 def collate_fn_inference(batch):

@@ -106,9 +106,8 @@ class LinearProjection(nn.Module):
 
 
 class SignalPositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_len=124):
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 124):
         super(SignalPositionalEncoding, self).__init__()
-        # self.dropout = nn.Dropout(p=dropout)
 
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(
@@ -123,6 +122,8 @@ class SignalPositionalEncoding(nn.Module):
                                 nn.Parameter(pe_cos, requires_grad=False))
         self.register_parameter('pe_sin',
                                 nn.Parameter(pe_sin, requires_grad=False))
+
+        # self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, r_pos_enc, q_pos_enc, signal_mask=None):
         B, S, _ = x.size()
@@ -142,9 +143,50 @@ class SignalPositionalEncoding(nn.Module):
         x[:, :, 3::4] += q_pos_enc.unsqueeze(-1) * self.div_term
 
         return x
+        # return self.dropout(x)
 
 
-class BaseLayer(nn.Module):
+class SignalLayer(nn.Module):
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int,
+        dim_ff: int,
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+
+        self.sa_norm = nn.LayerNorm(embed_dim)
+        self.self_attn = nn.MultiheadAttention(embed_dim,
+                                               num_heads,
+                                               dropout,
+                                               batch_first=True)
+        self.sa_dropout = nn.Dropout(dropout)
+
+        self.ff_norm = nn.LayerNorm(embed_dim)
+        self.ff_block = LinearProjection(embed_dim, dim_ff, dropout)
+
+    def self_attn_block(self,
+                        signal: Tensor,
+                        signal_mask: Optional[Tensor] = None) -> Tensor:
+        signal = self.self_attn(signal,
+                                signal,
+                                signal,
+                                key_padding_mask=signal_mask,
+                                need_weights=False)[0]
+        return self.sa_dropout(signal)
+
+    def forward(self,
+                signal: Tensor,
+                signal_mask: Optional[Tensor] = None) -> Tensor:
+        signal = signal + self.self_attn_block(self.sa_norm(signal),
+                                               signal_mask)
+        signal = signal + self.ff_block(self.ff_norm(signal))
+
+        return signal
+
+
+class AlignmentLayer(nn.Module):
     def __init__(
         self,
         embed_dim: int,
@@ -171,75 +213,75 @@ class BaseLayer(nn.Module):
         self.ff_norm = nn.LayerNorm(embed_dim)
         self.ff_block = LinearProjection(embed_dim, dim_ff, dropout)
 
-    def self_attn_block(self,
-                        x: Tensor,
-                        padding_mask: Optional[Tensor] = None) -> Tensor:
-        x = self.self_attn(x,
-                           x,
-                           x,
-                           key_padding_mask=padding_mask,
-                           need_weights=False)[0]
-        return self.sa_dropout(x)
+    def self_attn_block(self, bases: Tensor) -> Tensor:
+        bases = self.self_attn(bases, bases, bases, need_weights=False)[0]
+        return self.sa_dropout(bases)
 
     def mha_block(self,
-                  target: Tensor,
-                  memory: Tensor,
-                  padding_mask: Optional[Tensor] = None) -> Tensor:
-        x = self.mha(target,
-                     memory,
-                     memory,
-                     key_padding_mask=padding_mask,
-                     need_weights=False)[0]
-        return self.mha_dropout(x)
+                  bases: Tensor,
+                  signal: Tensor,
+                  signal_mask: Optional[Tensor] = None) -> Tensor:
+        bases = self.mha(bases,
+                         signal,
+                         signal,
+                         key_padding_mask=signal_mask,
+                         need_weights=False)[0]
+        bases = self.mha_dropout(bases)
+
+        return bases
 
     def forward(self,
-                target: Tensor,
-                norm_target: Tensor,
-                memory: Tensor,
-                tgt_padding_mask: Optional[Tensor] = None,
-                mem_padding_mask: Optional[Tensor] = None) -> Tensor:
+                bases: Tensor,
+                signal: Tensor,
+                signal_mask: Optional[Tensor] = None) -> Tensor:
+        bases = bases + self.self_attn_block(self.sa_norm(bases))
+        bases = bases + self.mha_block(self.mha_norm(bases), signal,
+                                       signal_mask)
+        bases = bases + self.ff_block(self.ff_norm(bases))
 
-        x = target
-
-        x = x + self.self_attn_block(norm_target, tgt_padding_mask)
-        x = x + self.mha_block(self.mha_norm(x), memory, mem_padding_mask)
-        x = x + self.ff_block(self.ff_norm(x))
-
-        return x
+        return bases
 
 
-class GRUDecoder(nn.Module):
-    def __init__(self, embed_dim: int, seq_len: int) -> None:
+class AlignmentDecoder(nn.Module):
+    def __init__(self,
+                 embed_dim: int,
+                 num_heads: int,
+                 dim_ff: int,
+                 n_layers: int,
+                 dropout: float = 0.0) -> None:
         super().__init__()
 
-        self.seq_len = seq_len
+        self.layers = nn.ModuleList([
+            AlignmentLayer(embed_dim, num_heads, dim_ff, dropout)
+            for _ in range(n_layers)
+        ])
 
-        hidden_init = torch.zeros((embed_dim, ))
-        self.hidden_init = torch.nn.Parameter(hidden_init, requires_grad=False)
+    def forward(self,
+                bases: Tensor,
+                signal: Tensor,
+                signal_mask: Optional[Tensor] = None):
+        for layer in self.layers:
+            bases = layer(bases, signal, signal_mask)
 
-        self.W = nn.Linear(embed_dim, embed_dim)
-        self.layer_norm = nn.LayerNorm(2 * embed_dim)
-        self.gru = nn.GRUCell(2 * embed_dim, embed_dim)
+        return bases
 
-    def forward(self, signal: torch.Tensor, bases: torch.Tensor,
-                padding_mask: torch.Tensor) -> torch.Tensor:
-        attn_mask = torch.zeros_like(padding_mask, dtype=signal.dtype)
-        attn_mask.masked_fill_(padding_mask, float('-inf'))
 
-        hidden = self.hidden_init.expand(bases.size(0), -1)
-        out = []
-        for i in range(self.seq_len):
-            v = self.W(hidden).unsqueeze(1)  # [B, 1, F]
-            e = torch.bmm(v, signal.transpose(1, 2)).squeeze(1)  # [B, S]
-            e += attn_mask  # apply mask
+class SignalEncoder(nn.Module):
+    def __init__(self,
+                 embed_dim: int,
+                 num_heads: int,
+                 dim_ff: int,
+                 n_layers: int,
+                 dropout: float = 0.0) -> None:
+        super().__init__()
 
-            score = e.softmax(dim=-1).unsqueeze(-1)  # [B, S, 1]
-            context = (score * signal).sum(dim=1)  # [B, F]
+        self.layers = nn.ModuleList([
+            SignalLayer(embed_dim, num_heads, dim_ff, dropout)
+            for _ in range(n_layers)
+        ])
 
-            input = torch.cat((bases[:, i], context), dim=1)  # [B, 2F]
-            input = self.layer_norm(input)
+    def forward(self, signal: Tensor, signal_mask: Optional[Tensor] = None):
+        for layer in self.layers:
+            signal = layer(signal, signal_mask)
 
-            hidden = self.gru(input, hidden)  # [B, F]
-            out.append(hidden)
-
-        return torch.stack(out, dim=1)
+        return signal
