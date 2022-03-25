@@ -17,9 +17,9 @@ MASK_CLS_LABEL = 4
 
 class Rockfish(pl.LightningModule):
     def __init__(self,
-                 features: int = 384,
+                 features: int = 256,
                  bases_len: int = 31,
-                 nhead: int = 6,
+                 nhead: int = 8,
                  dim_ff: Optional[int] = None,
                  n_layers: int = 12,
                  pos_dropout: float = 0.1,
@@ -171,9 +171,9 @@ class Rockfish(pl.LightningModule):
     def optimizer_zero_grad(self, epoch, batch_idx, optimizer, optimizer_idx):
         optimizer.zero_grad(set_to_none=True)
 
-    def get_diversity_loss(self, signal_code_logits):
-        probs = signal_code_logits.softmax(dim=-1)
-        avg_probs = probs.mean(dim=0)  # K
+    def get_diversity_loss(self, signal_code_logits, idx):
+        hard_probs = torch.zeros_like(signal_code_logits).scatter_(-1, idx.view(-1, 1), 1.0)
+        avg_probs = hard_probs.mean(dim=0) + 1e-7  # K
         log_avg_probs = avg_probs.log()
 
         return F.kl_div(log_avg_probs,
@@ -202,7 +202,7 @@ class Rockfish(pl.LightningModule):
         signal_mask_targets = signal_code_logits.argmax(dim=-1)
         signal_mask_loss = F.cross_entropy(context_code_logits,
                                            signal_mask_targets)
-        diversity_loss = self.get_diversity_loss(signal_code_logits)
+        diversity_loss = self.get_diversity_loss(signal_code_logits, signal_mask_targets)
 
         return signal_mask_loss, diversity_loss, signal_mask_targets
 
