@@ -1,4 +1,3 @@
-from sre_constants import SUCCESS
 import mappy
 import numpy as np
 from dataclasses import dataclass
@@ -44,18 +43,23 @@ def align_read(query: str, aligner: mappy.Aligner, mapq_filter: int,
     rpos, qpos = 0, alignment.q_st  # if alignment.strand == 1 else len(query) - alignment.q_en
 
     ref_to_query = np.empty((ref_len + 1, ), dtype=int)
-    for l, op in cigar:
+    for length, op in cigar:
         if op == 0 or op == 7 or op == 8:  # Match or mismatch
-            for i in range(l):
-                ref_to_query[rpos + i] = qpos + i
-            rpos += l
-            qpos += l
+            rend = rpos + length
+            ref_to_query[rpos:rend] = qpos + np.arange(length)
+
+            rpos = rend
+            qpos += length
         elif op == 1:  # Insertion
-            qpos += l
+            qpos += length
         elif op == 2:
-            for i in range(l):
-                ref_to_query[rpos + i] = qpos
-            rpos += l
+            rend = rpos + length
+            ref_to_query[rpos:rend] = qpos + np.arange(length)
+
+            rpos = rend
+        else:
+            raise ValueError(
+                f'Invalid cigar operation {op} for read {read_id}.')
     ref_to_query[rpos] = qpos  # Add the last one (excluded end)
 
     if ref_len != rpos:
