@@ -21,7 +21,6 @@ class Example:
     event_length: List[int]
     bases: str
     q_indices: np.ndarray
-    q_bases: str
 
 
 def build_reference_idx(aligner: mappy.Aligner, motif: str,
@@ -93,9 +92,6 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
     ref_seq = aligner.seq(aln_data.ctg, aln_data.r_start, aln_data.r_end)
     ref_seq = ref_seq if aln_data.fwd_strand else mappy.revcomp(ref_seq)
 
-    event_len_fn = lambda p: get_event_length(p, aln_data.ref_to_query,
-                                              seq_to_sig)
-
     examples = []
     for rel, pos in get_ref_pos(aln_data, ref_positions, window):
         q_start = aln_data.ref_to_query[rel - window]
@@ -113,16 +109,15 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         move_start = (sig_start - seq_to_sig[0]) // read_info.block_stride
         move_end = (sig_end - seq_to_sig[0]) // read_info.block_stride
         q_indices = read_info.move_table[move_start:move_end].cumsum() - 1
-        assert q_indices[-1] == len(query[q_start:q_end]) - 1
 
         event_lengts = [
-            event_len_fn(p) for p in range(rel - window, rel + window + 1)
+            get_event_length(p, aln_data.ref_to_query, seq_to_sig)
+            for p in range(rel - window, rel + window + 1)
         ]
 
         example = Example(read_info.read_id, aln_data.ctg, pos,
                           signal[sig_start:sig_end], event_lengts,
-                          ref_seq[rel - window:rel + window + 1], q_indices,
-                          query[q_start:q_end])
+                          ref_seq[rel - window:rel + window + 1], q_indices)
         examples.append(example)
 
     return status, examples
