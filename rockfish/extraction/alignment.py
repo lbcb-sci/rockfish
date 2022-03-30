@@ -54,7 +54,7 @@ def align_read(query: str, aligner: mappy.Aligner, mapq_filter: int,
             qpos += length
         elif op == 2:
             rend = rpos + length
-            ref_to_query[rpos:rend] = qpos + np.arange(length)
+            ref_to_query[rpos:rend] = qpos
 
             rpos = rend
         else:

@@ -2,94 +2,63 @@ from tqdm import tqdm
 
 from dataclasses import dataclass
 import sys
-from io import BufferedReader, BufferedWriter
+from io import BufferedWriter
 import struct
-from collections import defaultdict
+from collections import OrderedDict
 from itertools import count
 import argparse
 
 from typing import *
 
-EXAMPLE_HEADER_BYTES = 48
+from rf_format import *
 
 
-@dataclass
-class RFHeader:
-    ctgs: List[int]
-    n_examples: int
-    start_offset: int
-
-
-def parse_ctgs(fd: BufferedReader) -> List[str]:
-    fd.seek(0)
-
-    n_ctgs = int.from_bytes(fd.read(2), byteorder=sys.byteorder)
-    ctgs = []
-    for _ in range(n_ctgs):
-        ctg_name_len = int.from_bytes(fd.read(1), byteorder=sys.byteorder)
-        ctg_name = struct.unpack(f'={ctg_name_len}s', fd.read(ctg_name_len))[0]
-        ctgs.append(ctg_name.decode())
-
-    return ctgs
-
-
-def map_header(src: List[str]) -> Tuple[Dict[str, int], Dict[str, RFHeader]]:
-    ctg_encoding = defaultdict(lambda c=count(): next(c))
-    header_info = []
+def map_header(src: List[str]) -> Tuple[Dict[str, int], List[RFHeader]]:
+    ctg_encoding = OrderedDict()
+    headers = []
 
     for rf_file in src:
         with open(rf_file, 'rb') as rf_src:
-            c_map = [ctg_encoding[c] for c in parse_ctgs(rf_src)]
-            n_examples = int.from_bytes(rf_src.read(4),
-                                        byteorder=sys.byteorder,
-                                        signed=False)
-            start_offset = rf_src.tell()
+            header = RFHeader.parse_header(rf_src)
+            headers.append(header)
 
-        header_info.append(RFHeader(c_map, n_examples, start_offset))
+            for ctg in header.ctgs:
+                if ctg not in ctg_encoding:
+                    ctg_encoding[ctg] = len(ctg_encoding)
 
-    return ctg_encoding, header_info
+    return ctg_encoding, headers
 
 
 def write_header(dest: BufferedWriter, ctg_encoding: Dict[str, int],
                  n_examples: int) -> int:
     # Writing ctgs + placeholder for number of examples
-    n_refs = len(ctg_encoding)
-    data = struct.pack('=H', n_refs)
+    header = RFHeader([c for c, _ in ctg_encoding.items()], n_examples)
+    dest.write(header.to_bytes())
 
-    for ref_name, _ in ctg_encoding.items():
-        ref_len = len(ref_name)
-        data += struct.pack(f'=B{ref_len}s', ref_len, str.encode(ref_name))
-
-    n_examples_offset = len(data)
-    data += struct.pack('=I', n_examples)
-    dest.write(data)
-
-    return n_examples_offset
+    return header.size() - 4
 
 
 def merge(src: List[str], dest: str, seq_len: int) -> None:
     tqdm.write('Reading source headers.')
 
-    ctg_encoding, header_info = map_header(src)
-    n_examples = sum([h.n_examples for h in header_info])
+    ctg_encoding, headers = map_header(src)
+    n_examples = sum([h.n_examples for h in headers])
     tqdm.write(f'Total {n_examples} examples found.')
 
     with open(dest, 'wb') as rf_dest:
         write_header(rf_dest, ctg_encoding, n_examples)
         tqdm.write('Destination header written.\nWriting examples...')
 
-        for rf_file, header in zip(tqdm(src), header_info):
+        for rf_file, header in zip(tqdm(src), headers):
             with open(rf_file, 'rb') as rf_src:
-                rf_src.seek(header.start_offset)
+                rf_src.seek(header.size())
 
                 for _ in range(header.n_examples):
-                    example_info = rf_src.read(EXAMPLE_HEADER_BYTES)
-                    _, _, _, n_points, q_indices_len, q_bases_len = struct.unpack(
-                        '=36sHIHHH', example_info)
-                    n_bytes = 2 * n_points + 2 * q_indices_len + 3 * seq_len + q_bases_len
-                    example_data = rf_src.read(n_bytes)
+                    example_header = RFExampleHeader.parse_bytes(
+                        rf_src.read(EXAMPLE_HEADER_STRUCT.size))
+                    data = rf_src.read(example_header.example_len(seq_len))
 
-                    rf_dest.write(example_info + example_data)
+                    rf_dest.write(example_header.to_bytes() + data)
 
                 # assert EOF
                 if rf_src.read():

@@ -20,6 +20,8 @@ root = Path(__file__).resolve().parents[1] / 'rftools'
 sys.path.append(str(root))
 from merge import merge
 
+import traceback
+
 
 def get_files(path: Path, recursive: bool = False) -> Iterator[Path]:
     if path.is_file():
@@ -60,10 +62,11 @@ def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
                         writer.write_examples(examples)
 
                     status_count[status.name] += 1  # Update status
-                except:
-                    print(
-                        f'Exception occured for read: {read_info.read_id} in file {path}',
-                        file=sys.stderr)
+                except Exception as e:
+                    tqdm.write(
+                        f'Exception occured for read: {read_info.read_id} in file {path}'
+                    )
+                    tqdm.write(traceback.format_exc())
 
             out_queue.put(status_count)
 
@@ -71,20 +74,26 @@ def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
 
 
 def main(args: argparse.Namespace) -> None:
+    tqdm.write(
+        f'Retrieving files from {args.source}, recursive {args.recursive}')
+    files = list(get_files(args.source, args.recursive))
+
+    in_queue = mp.Queue()
+    n_workers = min(args.workers, len(files))
+
+    for p in files:
+        in_queue.put(p)
+    for _ in range(n_workers):
+        in_queue.put(None)
+
     tqdm.write(f'Parsing reference file {args.reference}')
     aligner = get_aligner(args.reference)
 
     tqdm.write('Building reference positions for the given motif.')
     ref_positions = build_reference_idx(aligner, args.motif, args.idx)
 
-    tqdm.write(
-        f'Retrieving files from {args.source}, recursive {args.recursive}')
-    files = list(get_files(args.source, args.recursive))
-
-    in_queue = mp.Queue()
     out_queue = mp.Queue()
 
-    n_workers = min(args.workers, len(files))
     workers = [None] * n_workers
     writers_path = [None] * n_workers
     for i in range(n_workers):
@@ -97,10 +106,6 @@ def main(args: argparse.Namespace) -> None:
         workers[i].start()
 
     tqdm.write('Processing started.')
-    for p in files:
-        in_queue.put(p)
-    for _ in range(n_workers):
-        in_queue.put(None)
 
     pbar = tqdm(total=len(files))
     status_count = Counter({e.name: 0 for e in AlignmentInfo})
