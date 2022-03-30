@@ -1,11 +1,8 @@
 from tqdm import tqdm
 
-from dataclasses import dataclass
 import sys
 from io import BufferedWriter
-import struct
 from collections import OrderedDict
-from itertools import count
 import argparse
 
 from typing import *

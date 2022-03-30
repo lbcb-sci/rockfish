@@ -1,3 +1,4 @@
+import sys
 import argparse
 
 from typing import *
@@ -31,8 +32,15 @@ def get_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-if __name__ == '__main__':
+def main():
     args = get_arguments()
 
     if args.func is not None:
         args.func(args)
+    else:
+        print('No function was chosen to run. Please specify a function.', file=sys.stderr)
+        sys.exit(-1)
+
+
+if __name__ == '__main__':
+    main()
