@@ -10,7 +10,7 @@ import argparse
 
 from typing import *
 
-from rf_format import *
+from rockfish.rf_format import *
 
 
 def map_header(src: List[str]) -> Tuple[Dict[str, int], List[RFHeader]]:
@@ -69,16 +69,13 @@ def merge(src: List[str], dest: str, seq_len: int) -> None:
     tqdm.write('Processing finished')
 
 
-def parse_arguments() -> argparse.Namespace:
+def add_merge_arguments(parser: argparse.ArgumentParser) -> None:
     parser = argparse.ArgumentParser()
 
     parser.add_argument('src', type=str, nargs='+')
     parser.add_argument('dest', type=str)
     parser.add_argument('-l', '--seq_len', type=int, default=31)
 
-    return parser.parse_args()
 
-
-if __name__ == '__main__':
-    args = parse_arguments()
+def main(args):
     merge(args.src, args.dest, args.seq_len)

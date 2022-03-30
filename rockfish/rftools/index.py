@@ -8,7 +8,7 @@ from pathlib import Path
 from dataclasses import dataclass
 import argparse
 
-from rf_format import *
+from rockfish.rf_format import *
 
 from typing import *
 
@@ -79,9 +79,7 @@ def index(rf_path: Path, index_path: Optional[Path], seq_len: int) -> None:
     tqdm.write(f'Finished index generation.')
 
 
-def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-
+def add_index_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('data_path', type=Path)
     parser.add_argument('-i',
                         '--index_path',
@@ -89,9 +87,6 @@ def parse_arguments() -> argparse.Namespace:
                         default=None)
     parser.add_argument('-s', '--seq_len', type=int, default=31)
 
-    return parser.parse_args()
 
-
-if __name__ == '__main__':
-    args = parse_arguments()
+def main(args):
     index(args.data_path, args.index_path, args.seq_len)
