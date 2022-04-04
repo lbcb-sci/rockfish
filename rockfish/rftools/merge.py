@@ -67,8 +67,6 @@ def merge(src: List[str], dest: str, seq_len: int) -> None:
 
 
 def add_merge_arguments(parser: argparse.ArgumentParser) -> None:
-    parser = argparse.ArgumentParser()
-
     parser.add_argument('src', type=str, nargs='+')
     parser.add_argument('dest', type=str)
     parser.add_argument('-l', '--seq_len', type=int, default=31)

@@ -16,6 +16,7 @@ from .rftools.merge import add_merge_arguments as merge_args
 def get_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest='func')
+    parser.set_defaults(func=lambda x: parser.print_usage())
 
     extract_parser = subparsers.add_parser('extract')
     extract_parser.set_defaults(func=extract_func)
@@ -34,12 +35,7 @@ def get_arguments() -> argparse.Namespace:
 
 def main():
     args = get_arguments()
-
-    if args.func is not None:
-        args.func(args)
-    else:
-        print('No function was chosen to run. Please specify a function.', file=sys.stderr)
-        sys.exit(-1)
+    args.func(args)
 
 
 if __name__ == '__main__':
