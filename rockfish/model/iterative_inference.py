@@ -28,7 +28,8 @@ def inference_worker(args: argparse.Namespace, gpu: Optional[int],
     device = torch.device(f'cuda:{gpu}') if gpu is not None else torch.device(
         'cpu')
 
-    model = Rockfish.load_from_checkpoint(args.ckpt_path).to(device)
+    model = Rockfish.load_from_checkpoint(args.ckpt_path,
+                                          track_metrics=False).to(device)
     model.eval()
 
     ref_len = model.hparams.bases_len
@@ -56,7 +57,7 @@ def inference_worker(args: argparse.Namespace, gpu: Optional[int],
             q_mappings = q_mappings.to(device)
             n_blocks = n_blocks.to(device)
 
-            logits = model(signals, bases, r_mappings, q_mappings,
+            logits = model(signals, r_mappings, q_mappings, bases,
                            n_blocks).cpu().numpy()
 
             for id, ctg, pos, logit in zip(ids, ctgs, positions, logits):
@@ -64,8 +65,8 @@ def inference_worker(args: argparse.Namespace, gpu: Optional[int],
             out_queue.put(len(positions))  # Notify tqdm
 
 
-def cat_outputs(src_paths: List[str], dest_paths) -> None:
-    with open(args.output) as dest:
+def cat_outputs(src_paths: List[str], dest_path: str) -> None:
+    with open(dest_path, 'w') as dest:
         with fileinput.input(files=src_paths) as src:
             for line in src:
                 dest.write(line)

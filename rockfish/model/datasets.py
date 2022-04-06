@@ -14,7 +14,6 @@ import math
 from typing import *
 
 ENCODING = {b: i for i, b in enumerate('ACGT')}
-Q_BASE_PADDING = 5
 
 
 class Labels:
@@ -64,6 +63,19 @@ def read_offsets(path: str) -> List[int]:
         return indices
 
 
+def read_offsets2(path: str) -> List[int]:
+    with open(path, 'rb') as f:
+        n_examples = int.from_bytes(f.read(4), byteorder=sys.byteorder)
+        start = int.from_bytes(f.read(4), byteorder=sys.byteorder)
+
+        data = np.empty((n_examples + 1, ), dtype=int)
+        data[0] = start
+        data[1:] = np.fromfile(f, dtype=np.ushort)
+
+        data = np.cumsum(data)
+        return data[:-1]
+
+
 def parse_ctgs(fd: BufferedReader) -> List[str]:
     fd.seek(0)
 
@@ -94,19 +106,23 @@ def read_example(fd: BufferedReader,
     if offset is not None:
         fd.seek(offset)
 
-    read_id, ctg, pos, n_points, q_indices_len, q_bases_len = struct.unpack(
-        '=36sHIHHH', fd.read(48))
+    read_id, ctg, pos, n_points, q_indices_len = struct.unpack(
+        '=36sHIHH', fd.read(46))
+    #read_id, ctg, pos, n_points, q_indices_len, q_bases_len = struct.unpack(
+    #    '=36sHIHHH', fd.read(48))
 
-    n_bytes = 2 * n_points + 2 * q_indices_len + 3 * ref_len + q_bases_len
+    n_bytes = 2 * n_points + 2 * q_indices_len + 3 * ref_len
+    #n_bytes = 2 * n_points + 2 * q_indices_len + 3 * ref_len + q_bases_len
     data = struct.unpack(
-        f'={n_points}e{q_indices_len}H{ref_len}H{ref_len}s{q_bases_len}s',
+        f'={n_points}e{q_indices_len}H{ref_len}H{ref_len}s',
+        # f'={n_points}e{q_indices_len}H{ref_len}H{ref_len}s{q_bases_len}s',
         fd.read(n_bytes))
     event_len_start = n_points + q_indices_len
 
     signal = np.array(data[:n_points], dtype=np.half)
     q_indices = data[n_points:event_len_start]
-    lengths = data[event_len_start:-2]
-    bases = data[-2].decode()
+    lengths = data[event_len_start:-1]
+    bases = data[-1].decode()
 
     return Example(read_id.decode(), ctg, pos, signal, q_indices, lengths,
                    bases)
@@ -186,7 +202,7 @@ class RFInferenceDataset(IterableDataset):
         with open(self.path, 'rb') as fd:
             self.ctgs = parse_ctgs(fd)
 
-        self.offsets = read_offsets(f'{path}.idx')
+        self.offsets = read_offsets2(f'{path}.idx')
         self.start = 0 if start_idx is None else start_idx
         self.end = len(self.offsets) if end_idx is None else end_idx
 
