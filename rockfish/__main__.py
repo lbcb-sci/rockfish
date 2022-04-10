@@ -9,7 +9,7 @@ from .extract.main import add_extract_arguments as extract_args
 from .rftools.index import main as index_func
 from .rftools.index import add_index_arguments as index_args
 
-from .rftools.merge import merge as merge_func
+from .rftools.merge import main as merge_func
 from .rftools.merge import add_merge_arguments as merge_args
 
 
