@@ -155,7 +155,8 @@ class RFTrainDataset(Dataset):
         self.ctgs = None
 
         self.offsets = read_offsets2(f'{path}.idx')
-        self.labels = Labels(labels)
+        # self.labels = Labels(labels)
+        self.labels = np.memmap(labels, dtype=np.half)
 
         self.reference_mapping = ReferenceMapping(self.ref_len, block_size)
 
@@ -174,8 +175,9 @@ class RFTrainDataset(Dataset):
         ref_mapping = self.reference_mapping(lengths)
         q_indices = torch.tensor(example.q_indices)
 
-        label = self.labels.get_label(example.read_id, self.ctgs[example.ctg],
-                                      example.pos)
+        #label = self.labels.get_label(example.read_id, self.ctgs[example.ctg],
+        #                              example.pos)
+        label = self.labels[idx]
 
         return signal, ref_mapping, q_indices, bases, label
 

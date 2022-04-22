@@ -183,6 +183,18 @@ class Rockfish(pl.LightningModule):
                                      device=log_avg_probs.device),
                         reduction='batchmean')
 
+    @staticmethod
+    def entropy(probs):
+        probs = probs + 1e-7
+        return -(probs + probs.log()).sum()
+
+    def get_diversity_loss2(self, signal_code_logits, idx):
+        hard_probs = torch.zeros_like(signal_code_logits).scatter_(
+            -1, idx.view(-1, 1), 1.0)
+        avg_probs = hard_probs.mean(dim=0) + 1e-7  # K
+
+        return (self.max_codebook_entropy - avg_probs) / len(avg_probs)
+
     def bases_masking(self, bases):
         probs = torch.rand(*bases.shape, device=bases.device)
         mask = (probs < self.hparams.bases_mask_prob)
@@ -203,8 +215,8 @@ class Rockfish(pl.LightningModule):
         signal_mask_targets = signal_code_logits.argmax(dim=-1)
         signal_mask_loss = F.cross_entropy(context_code_logits,
                                            signal_mask_targets.detach())
-        diversity_loss = self.get_diversity_loss(signal_code_logits,
-                                                 signal_mask_targets)
+        diversity_loss = self.get_diversity_loss2(signal_code_logits,
+                                                  signal_mask_targets)
 
         return signal_mask_loss, diversity_loss, signal_mask_targets
 
@@ -241,7 +253,7 @@ class Rockfish(pl.LightningModule):
         if signal_code_logits is not None:
             signal_mask_loss, diversity_loss, signal_mask_targets = self.signal_masking_losses(
                 signal_code_logits, context_code_logits)
-            loss += self.hparams.alpha * signal_mask_loss + diversity_loss
+            loss += self.hparams.alpha * (signal_mask_loss + diversity_loss)
 
             self.log('train_signal_mask_loss', signal_mask_loss)
             self.log('train_diversity_loss', diversity_loss)
