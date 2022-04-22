@@ -12,6 +12,9 @@ from .rftools.index import add_index_arguments as index_args
 from .rftools.merge import main as merge_func
 from .rftools.merge import add_merge_arguments as merge_args
 
+from .rftools.convert_labels import main as convert_labels_func
+from .rftools.convert_labels import add_convert_labels_args as convert_labels_args
+
 
 def get_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -29,6 +32,10 @@ def get_arguments() -> argparse.Namespace:
     merge_parser = subparsers.add_parser('merge')
     merge_parser.set_defaults(func=merge_func)
     merge_args(merge_parser)
+
+    convert_labels_parser = subparsers.add_parser('convert_labels')
+    convert_labels_parser.set_defaults(func=convert_labels_func)
+    convert_labels_args(convert_labels_parser)
 
     return parser.parse_args()
 

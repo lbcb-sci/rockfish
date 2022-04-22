@@ -123,3 +123,33 @@ class RFExampleData:
     def to_bytes(self) -> bytes:
         return self.signal.tobytes() + self.q_indices.tobytes(
         ) + self.event_lengths.tobytes() + str.encode(self.bases)
+
+
+class DictLabels:
+    def __init__(self, path: str) -> None:
+        self.label_for_read = {}
+        self.label_for_pos = {}
+        self.label_for_read_pos = {}
+
+        with open(path, 'r') as f:
+            for i, line in enumerate(f, start=1):
+                data = line.strip().split('\t')
+
+                if len(data) == 3:
+                    self.label_for_read[data[0]] = float(data[2])
+                elif len(data) == 4:
+                    key = data[0], data[1], int(data[2])
+                    if key[0] == '*':
+                        self.label_for_pos[(key[1], key[2])] = float(data[3])
+                    else:
+                        self.label_for_read_pos[key] = float(data[3])
+                else:
+                    raise ValueError(f'Wrong label line {i}.')
+
+    def get_label(self, read_id, ctg, pos):
+        if read_id in self.label_for_read:
+            return self.label_for_read[read_id]
+        elif (ctg, pos) in self.label_for_pos:
+            return self.label_for_pos[(ctg, pos)]
+
+        return self.label_for_read_pos[(read_id, ctg, pos)]
