@@ -13,7 +13,7 @@ import math
 
 from typing import *
 
-ENCODING = {b: i for i, b in enumerate('ACGT')}
+ENCODING = {b: i for i, b in enumerate('ACGTN')}
 
 
 class Labels:
@@ -27,13 +27,13 @@ class Labels:
                 data = line.strip().split('\t')
 
                 if len(data) == 3:
-                    self.label_for_read[data[0]] = int(data[2])
+                    self.label_for_read[data[0]] = float(data[2])
                 elif len(data) == 4:
                     key = data[0], data[1], int(data[2])
                     if key[0] == '*':
-                        self.label_for_pos[(key[1], key[2])] = int(data[3])
+                        self.label_for_pos[(key[1], key[2])] = float(data[3])
                     else:
-                        self.label_for_read_pos[key] = int(data[3])
+                        self.label_for_read_pos[key] = float(data[3])
                 else:
                     raise ValueError(f'Wrong label line {i}.')
 
@@ -43,7 +43,7 @@ class Labels:
         elif (ctg, pos) in self.label_for_pos:
             return self.label_for_pos[(ctg, pos)]
 
-        return self.label_for_pos[(read_id, ctg, pos)]
+        return self.label_for_read_pos[(read_id, ctg, pos)]
 
 
 def get_n_examples(path: str) -> int:
@@ -115,7 +115,7 @@ def read_example(fd: BufferedReader,
     #n_bytes = 2 * n_points + 2 * q_indices_len + 3 * ref_len + q_bases_len
     data = struct.unpack(
         f'={n_points}e{q_indices_len}H{ref_len}H{ref_len}s',
-        # f'={n_points}e{q_indices_len}H{ref_len}H{ref_len}s{q_bases_len}s',
+        #f'={n_points}e{q_indices_len}H{ref_len}H{ref_len}s{q_bases_len}s',
         fd.read(n_bytes))
     event_len_start = n_points + q_indices_len
 
@@ -154,7 +154,7 @@ class RFTrainDataset(Dataset):
         self.fd = None
         self.ctgs = None
 
-        self.offsets = read_offsets(f'{path}.idx')
+        self.offsets = read_offsets2(f'{path}.idx')
         self.labels = Labels(labels)
 
         self.reference_mapping = ReferenceMapping(self.ref_len, block_size)
@@ -257,7 +257,7 @@ class RFInferenceDataset(IterableDataset):
         signal = torch.tensor(example.signal,
                               dtype=torch.half).unfold(-1, self.block_size,
                                                        self.block_size)
-        bases = torch.tensor([ENCODING[b] for b in example.bases])
+        bases = torch.tensor([ENCODING.get(b, 4) for b in example.bases])
         q_indices = torch.tensor(example.q_indices)
         lengths = torch.tensor(example.lengths)
 

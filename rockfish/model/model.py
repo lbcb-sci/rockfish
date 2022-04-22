@@ -12,7 +12,7 @@ from layers import SignalPositionalEncoding, PositionalEncoding, SignalEncoder, 
 
 from typing import *
 
-MASK_CLS_LABEL = 4
+MASK_CLS_LABEL = 5
 
 
 class Rockfish(pl.LightningModule):
@@ -50,7 +50,7 @@ class Rockfish(pl.LightningModule):
 
         self.signal_pe = SignalPositionalEncoding(features)
 
-        self.ref_embedding = nn.Embedding(5, features)
+        self.ref_embedding = nn.Embedding(6, features)
         self.ref_pe = PositionalEncoding(features, pos_dropout, bases_len)
 
         self.signal_encoder = SignalEncoder(features, nhead, dim_ff, n_layers,
@@ -62,7 +62,7 @@ class Rockfish(pl.LightningModule):
         self.bases_norm = nn.LayerNorm(features)
 
         self.fc_mod = nn.Linear(features, 1)
-        self.fc_mask = nn.Linear(features, 4)
+        self.fc_mask = nn.Linear(features, 5)
 
         if track_metrics:
             self.train_mod_acc = Accuracy()
@@ -172,7 +172,8 @@ class Rockfish(pl.LightningModule):
         optimizer.zero_grad(set_to_none=True)
 
     def get_diversity_loss(self, signal_code_logits, idx):
-        hard_probs = torch.zeros_like(signal_code_logits).scatter_(-1, idx.view(-1, 1), 1.0)
+        hard_probs = torch.zeros_like(signal_code_logits).scatter_(
+            -1, idx.view(-1, 1), 1.0)
         avg_probs = hard_probs.mean(dim=0) + 1e-7  # K
         log_avg_probs = avg_probs.log()
 
@@ -201,8 +202,9 @@ class Rockfish(pl.LightningModule):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         signal_mask_targets = signal_code_logits.argmax(dim=-1)
         signal_mask_loss = F.cross_entropy(context_code_logits,
-                                           signal_mask_targets)
-        diversity_loss = self.get_diversity_loss(signal_code_logits, signal_mask_targets)
+                                           signal_mask_targets.detach())
+        diversity_loss = self.get_diversity_loss(signal_code_logits,
+                                                 signal_mask_targets)
 
         return signal_mask_loss, diversity_loss, signal_mask_targets
 
@@ -288,8 +290,7 @@ def cli_main():
     RockfishLightningCLI(
         Rockfish,
         RFDataModule,
-        seed_everything_default=
-        1991,  # 42 for first training, 43 self-distilation
+        seed_everything_default=42,  # 42 for first training, 43 self-distilation
         save_config_overwrite=True,
         trainer_defaults=get_trainer_defaults())
 
