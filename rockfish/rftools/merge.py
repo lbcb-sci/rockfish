@@ -1,5 +1,6 @@
 from tqdm import tqdm
 
+import os
 import sys
 from io import BufferedWriter
 from collections import OrderedDict
@@ -35,7 +36,7 @@ def write_header(dest: BufferedWriter, ctg_encoding: Dict[str, int],
     return header.size() - 4
 
 
-def merge(src: List[str], dest: str, seq_len: int) -> None:
+def merge(src: List[str], dest: str, seq_len: int, delete_src: bool) -> None:
     tqdm.write('Reading source headers.')
 
     ctg_encoding, headers = map_header(src)
@@ -55,6 +56,9 @@ def merge(src: List[str], dest: str, seq_len: int) -> None:
                         rf_src.read(EXAMPLE_HEADER_STRUCT.size))
                     data = rf_src.read(example_header.example_len(seq_len))
 
+                    ctg = header.ctgs[example_header.ctg_id]
+                    example_header.ctg_id = ctg_encoding[ctg]
+
                     rf_dest.write(example_header.to_bytes() + data)
 
                 # assert EOF
@@ -62,15 +66,21 @@ def merge(src: List[str], dest: str, seq_len: int) -> None:
                     tqdm.write(
                         f'ERROR: {rf_file} EOF expected but data was read.')
                     sys.exit(1)
-
+    
     tqdm.write('Processing finished')
 
+    if delete_src:
+        tqdm.write('Deleting source files...')
+        for path in src:
+            os.remove(path)
+
+    tqdm.write('Processing finished')
 
 def add_merge_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('src', type=str, nargs='+')
     parser.add_argument('dest', type=str)
     parser.add_argument('-l', '--seq_len', type=int, default=31)
-
+    parser.add_argument('-d', '--delete_src', action='store_true')
 
 def main(args):
-    merge(args.src, args.dest, args.seq_len)
+    merge(args.src, args.dest, args.seq_len, args.delete_src)

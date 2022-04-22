@@ -115,7 +115,7 @@ def extract(args: argparse.Namespace) -> None:
     for w in workers:  # All workers should finish soon
         w.join()
 
-    merge(writers_path, args.dest, 2 * args.window + 1)
+    merge(writers_path, args.dest, 2 * args.window + 1, True)
     for p in writers_path:  # Removing tmp files
         p.unlink()
 
