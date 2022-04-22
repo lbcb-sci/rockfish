@@ -156,7 +156,7 @@ class RFTrainDataset(Dataset):
 
         self.offsets = read_offsets2(f'{path}.idx')
         # self.labels = Labels(labels)
-        self.labels = np.memmap(labels, dtype=np.half)
+        self.labels = np.fromfile(labels, dtype=np.half)
 
         self.reference_mapping = ReferenceMapping(self.ref_len, block_size)
 

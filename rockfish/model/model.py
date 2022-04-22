@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchmetrics import Accuracy, AveragePrecision
+from torchmetrics.functional import accuracy as acc
 
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -47,6 +48,7 @@ class Rockfish(pl.LightningModule):
 
         if self.hparams.signal_mask_prob > 1e-6:
             self.codebook = nn.Linear(features, codebook_size, bias=False)
+            self.max_codebook_entropy = Rockfish.entropy(torch.tensor([1/codebook_size] * codebook_size))
 
         self.signal_pe = SignalPositionalEncoding(features)
 
@@ -65,9 +67,9 @@ class Rockfish(pl.LightningModule):
         self.fc_mask = nn.Linear(features, 5)
 
         if track_metrics:
-            self.train_mod_acc = Accuracy()
-            self.train_mask_acc = Accuracy()
-            self.train_signal_mask_acc = Accuracy()
+            # self.train_mod_acc = Accuracy(compute)
+            # self.train_mask_acc = Accuracy()
+            # self.train_signal_mask_acc = Accuracy()
 
             self.val_acc = Accuracy()
             self.val_ap = AveragePrecision()
@@ -186,14 +188,15 @@ class Rockfish(pl.LightningModule):
     @staticmethod
     def entropy(probs):
         probs = probs + 1e-7
-        return -(probs + probs.log()).sum()
+        return -(probs * probs.log()).sum()
 
     def get_diversity_loss2(self, signal_code_logits, idx):
         hard_probs = torch.zeros_like(signal_code_logits).scatter_(
             -1, idx.view(-1, 1), 1.0)
-        avg_probs = hard_probs.mean(dim=0) + 1e-7  # K
+        avg_probs = hard_probs.mean(dim=0) # K
 
-        return (self.max_codebook_entropy - avg_probs) / len(avg_probs)
+        entropy = Rockfish.entropy(avg_probs)
+        return self.max_codebook_entropy - entropy
 
     def bases_masking(self, bases):
         probs = torch.rand(*bases.shape, device=bases.device)
@@ -240,7 +243,7 @@ class Rockfish(pl.LightningModule):
         loss = mod_loss
         self.log('train_mod_loss', mod_loss)
         self.log('train_mod_acc',
-                 self.train_mod_acc(mod_logits, (labels > 0.5).int()))
+                 acc(mod_logits, (labels > 0.5).int()))
 
         if mask_logits is not None:
             mask_loss = F.cross_entropy(mask_logits, target_bases)
@@ -248,7 +251,7 @@ class Rockfish(pl.LightningModule):
 
             self.log('train_mask_loss', mask_loss)
             self.log('train_mask_acc',
-                     self.train_mask_acc(mask_logits, target_bases))
+                     acc(mask_logits, target_bases))
 
         if signal_code_logits is not None:
             signal_mask_loss, diversity_loss, signal_mask_targets = self.signal_masking_losses(
@@ -259,7 +262,7 @@ class Rockfish(pl.LightningModule):
             self.log('train_diversity_loss', diversity_loss)
             self.log(
                 'train_signal_mask_acc',
-                self.train_signal_mask_acc(context_code_logits,
+                acc(context_code_logits,
                                            signal_mask_targets))
 
         self.log('train_loss', loss)
