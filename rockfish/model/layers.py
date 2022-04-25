@@ -11,7 +11,7 @@ from typing import *
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, dropout=0.1, max_len=128):
+    def __init__(self, d_model, dropout=0.1, max_len=31):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
 
@@ -123,7 +123,7 @@ class SignalPositionalEncoding(nn.Module):
         self.register_parameter('pe_sin',
                                 nn.Parameter(pe_sin, requires_grad=False))
 
-        # self.dropout = nn.Dropout(dropout)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, r_pos_enc, q_pos_enc, signal_mask=None):
         B, S, _ = x.size()
@@ -142,8 +142,7 @@ class SignalPositionalEncoding(nn.Module):
         x[:, :, 2::4] += r_pos_enc.unsqueeze(-1) * self.div_term
         x[:, :, 3::4] += q_pos_enc.unsqueeze(-1) * self.div_term
 
-        return x
-        # return self.dropout(x)
+        return self.dropout(x)
 
 
 class SignalLayer(nn.Module):
@@ -248,7 +247,7 @@ class AlignmentDecoder(nn.Module):
                  num_heads: int,
                  dim_ff: int,
                  n_layers: int,
-                 dropout: float = 0.0) -> None:
+                 dropout: float = 0.1) -> None:
         super().__init__()
 
         self.layers = nn.ModuleList([
@@ -272,7 +271,7 @@ class SignalEncoder(nn.Module):
                  num_heads: int,
                  dim_ff: int,
                  n_layers: int,
-                 dropout: float = 0.0) -> None:
+                 dropout: float = 0.1) -> None:
         super().__init__()
 
         self.layers = nn.ModuleList([

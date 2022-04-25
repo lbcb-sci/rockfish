@@ -1,12 +1,13 @@
-from contextlib import ExitStack
 import torch
 from torch.nn import DataParallel
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+import os
 import multiprocessing as mp
 import argparse
 import fileinput
+from contextlib import ExitStack
 
 from datasets import *
 from model import Rockfish
@@ -102,6 +103,10 @@ def main(args: argparse.Namespace) -> None:
             pbar.update(n_processed)
 
     cat_outputs(output_paths, args.output)
+
+    # Delete temporary files
+    for path in output_paths:
+        os.remove(path)
 
 
 @torch.no_grad()
