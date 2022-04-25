@@ -6,8 +6,8 @@ import re
 
 from typing import *
 
-from fast5 import ReadInfo
-from alignment import AlignmentInfo, align_read
+from .fast5 import ReadInfo
+from .alignment import AlignmentData, align_read
 
 MotifPositions = Dict[str, Tuple[Set[int], Set[int]]]
 
@@ -17,10 +17,10 @@ class Example:
     read_id: str
     ctg: str
     pos: int
-    signal: List[float]
+    signal: np.ndarray
     event_length: List[int]
     bases: str
-    q_indices: List[int]
+    q_indices: np.ndarray
 
 
 def build_reference_idx(aligner: mappy.Aligner, motif: str,
@@ -50,17 +50,17 @@ def build_reference_idx(aligner: mappy.Aligner, motif: str,
     return positions
 
 
-def get_ref_pos(aln_info: AlignmentInfo, ref_positions: MotifPositions,
+def get_ref_pos(aln_data: AlignmentData, ref_positions: MotifPositions,
                 window: int) -> Iterator[int]:
-    if aln_info.fwd_strand:
-        ctg_pos = ref_positions[aln_info.ctg][0]
+    if aln_data.fwd_strand:
+        ctg_pos = ref_positions[aln_data.ctg][0]
     else:
-        ctg_pos = ref_positions[aln_info.ctg][1]
+        ctg_pos = ref_positions[aln_data.ctg][1]
 
-    if aln_info.fwd_strand:
-        rng = range(aln_info.r_start + window, aln_info.r_end - window)
+    if aln_data.fwd_strand:
+        rng = range(aln_data.r_start + window, aln_data.r_end - window)
     else:
-        rng = range(aln_info.r_end - 1 - window, aln_info.r_start - 1 + window,
+        rng = range(aln_data.r_end - 1 - window, aln_data.r_start - 1 + window,
                     -1)
 
     for rel, rpos in enumerate(rng, start=window):
@@ -76,31 +76,29 @@ def get_event_length(position: int, ref_to_query: np.ndarray,
 
 
 def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
-                     aligner: mappy.Aligner, window: int,
-                     mapq_filter: bool) -> List[Example]:
+                     aligner: mappy.Aligner, window: int, mapq_filter: int,
+                     unique_aln: bool) -> List[Example]:
     seq_to_sig = read_info.get_seq_to_sig()
     signal = read_info.get_normalized_signal(end=seq_to_sig[-1]) \
                         .astype(np.half)
     query, _ = read_info.get_seq_and_quals()
     example_bases = (2 * window) + 1
 
-    aln_info = align_read(query, aligner, mapq_filter, read_info.read_id)
-    if aln_info is None:
-        return None
+    status, aln_data = align_read(query, aligner, mapq_filter, unique_aln,
+                                  read_info.read_id)
+    if aln_data is None:
+        return status, None
 
-    ref_seq = aligner.seq(aln_info.ctg, aln_info.r_start, aln_info.r_end)
-    ref_seq = ref_seq if aln_info.fwd_strand else mappy.revcomp(ref_seq)
-
-    event_len_fn = lambda p: get_event_length(p, aln_info.ref_to_query,
-                                              seq_to_sig)
+    ref_seq = aligner.seq(aln_data.ctg, aln_data.r_start, aln_data.r_end)
+    ref_seq = ref_seq if aln_data.fwd_strand else mappy.revcomp(ref_seq)
 
     examples = []
-    for rel, pos in get_ref_pos(aln_info, ref_positions, window):
-        q_start = aln_info.ref_to_query[rel - window]
+    for rel, pos in get_ref_pos(aln_data, ref_positions, window):
+        q_start = aln_data.ref_to_query[rel - window]
         sig_start = seq_to_sig[q_start]
 
         # q_end -> Start of the first base after example
-        q_end = aln_info.ref_to_query[rel + window + 1]
+        q_end = aln_data.ref_to_query[rel + window + 1]
         # sig_end -> Start of the first signal point after example
         sig_end = seq_to_sig[q_end]
 
@@ -108,21 +106,18 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         if n_blocks < example_bases or n_blocks > 4 * example_bases:
             continue
 
-        move_start = (sig_start - seq_to_sig[0]) // 5
-        move_end = (sig_end - seq_to_sig[0]) // 5
-        assert move_end - move_start == n_blocks, f"n_moves {move_end - move_start}, n_blocks {n_blocks}"
-        assert read_info.move_table[
-            move_start] == 1, 'First element of move table has to start with 1.'
-        q_indices = (read_info.move_table[move_start:move_end].cumsum() -
-                     1).tolist()
+        move_start = (sig_start - seq_to_sig[0]) // read_info.block_stride
+        move_end = (sig_end - seq_to_sig[0]) // read_info.block_stride
+        q_indices = read_info.move_table[move_start:move_end].cumsum() - 1
 
         event_lengts = [
-            event_len_fn(p) for p in range(rel - window, rel + window + 1)
+            get_event_length(p, aln_data.ref_to_query, seq_to_sig)
+            for p in range(rel - window, rel + window + 1)
         ]
 
-        example = Example(read_info.read_id, aln_info.ctg, pos,
+        example = Example(read_info.read_id, aln_data.ctg, pos,
                           signal[sig_start:sig_end], event_lengts,
                           ref_seq[rel - window:rel + window + 1], q_indices)
         examples.append(example)
 
-    return examples
+    return status, examples
