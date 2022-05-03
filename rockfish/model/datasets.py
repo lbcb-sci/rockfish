@@ -7,64 +7,25 @@ import pytorch_lightning as pl
 
 from dataclasses import dataclass
 from io import BufferedReader
-import struct
 import sys
 import math
 
 from typing import *
 
+from rockfish.rf_format import *
+
+
 ENCODING = {b: i for i, b in enumerate('ACGTN')}
 
 
-class Labels:
-    def __init__(self, path: str) -> None:
-        self.label_for_read = {}
-        self.label_for_pos = {}
-        self.label_for_read_pos = {}
-
-        with open(path, 'r') as f:
-            for i, line in enumerate(f, start=1):
-                data = line.strip().split('\t')
-
-                if len(data) == 3:
-                    self.label_for_read[data[0]] = float(data[2])
-                elif len(data) == 4:
-                    key = data[0], data[1], int(data[2])
-                    if key[0] == '*':
-                        self.label_for_pos[(key[1], key[2])] = float(data[3])
-                    else:
-                        self.label_for_read_pos[key] = float(data[3])
-                else:
-                    raise ValueError(f'Wrong label line {i}.')
-
-    def get_label(self, read_id, ctg, pos):
-        if read_id in self.label_for_read:
-            return self.label_for_read[read_id]
-        elif (ctg, pos) in self.label_for_pos:
-            return self.label_for_pos[(ctg, pos)]
-
-        return self.label_for_read_pos[(read_id, ctg, pos)]
-
-
-def get_n_examples(path: str) -> int:
-    with open(path, 'rb') as f:
+def get_n_examples(idx_path: str) -> int:
+    with open(idx_path, 'rb') as f:
         n_examples = int.from_bytes(f.read(4), byteorder=sys.byteorder)
         return n_examples
 
 
-def read_offsets(path: str) -> List[int]:
-    with open(path, 'rb') as f:
-        n_examples = int.from_bytes(f.read(4), byteorder=sys.byteorder)
-        indices = [
-            int.from_bytes(f.read(8), byteorder=sys.byteorder)
-            for _ in range(n_examples)
-        ]
-
-        return indices
-
-
-def read_offsets2(path: str) -> List[int]:
-    with open(path, 'rb') as f:
+def read_offsets(idx_path: str) -> List[int]:
+    with open(idx_path, 'rb') as f:
         n_examples = int.from_bytes(f.read(4), byteorder=sys.byteorder)
         start = int.from_bytes(f.read(4), byteorder=sys.byteorder)
 
@@ -74,58 +35,6 @@ def read_offsets2(path: str) -> List[int]:
 
         data = np.cumsum(data)
         return data[:-1]
-
-
-def parse_ctgs(fd: BufferedReader) -> List[str]:
-    fd.seek(0)
-
-    n_ctgs = int.from_bytes(fd.read(2), byteorder=sys.byteorder)
-    ctgs = []
-    for _ in range(n_ctgs):
-        ctg_name_len = int.from_bytes(fd.read(1), byteorder=sys.byteorder)
-        ctg_name = struct.unpack(f'={ctg_name_len}s', fd.read(ctg_name_len))[0]
-        ctgs.append(ctg_name.decode())
-
-    return ctgs
-
-
-@dataclass
-class Example:
-    read_id: str
-    ctg: int
-    pos: int
-    signal: np.ndarray
-    q_indices: List[int]
-    lengths: List[int]
-    bases: str
-
-
-def read_example(fd: BufferedReader,
-                 ref_len: int,
-                 offset: Optional[int] = None) -> Example:
-    if offset is not None:
-        fd.seek(offset)
-
-    read_id, ctg, pos, n_points, q_indices_len = struct.unpack(
-        '=36sHIHH', fd.read(46))
-    #read_id, ctg, pos, n_points, q_indices_len, q_bases_len = struct.unpack(
-    #    '=36sHIHHH', fd.read(48))
-
-    n_bytes = 2 * n_points + 2 * q_indices_len + 3 * ref_len
-    #n_bytes = 2 * n_points + 2 * q_indices_len + 3 * ref_len + q_bases_len
-    data = struct.unpack(
-        f'={n_points}e{q_indices_len}H{ref_len}H{ref_len}s',
-        #f'={n_points}e{q_indices_len}H{ref_len}H{ref_len}s{q_bases_len}s',
-        fd.read(n_bytes))
-    event_len_start = n_points + q_indices_len
-
-    signal = np.array(data[:n_points], dtype=np.half)
-    q_indices = data[n_points:event_len_start]
-    lengths = data[event_len_start:-1]
-    bases = data[-1].decode()
-
-    return Example(read_id.decode(), ctg, pos, signal, q_indices, lengths,
-                   bases)
 
 
 class ReferenceMapping:
@@ -154,7 +63,7 @@ class RFTrainDataset(Dataset):
         self.fd = None
         self.ctgs = None
 
-        self.offsets = read_offsets2(f'{path}.idx')
+        self.offsets = read_offsets(f'{path}.idx')
         # self.labels = Labels(labels)
         self.labels = np.fromfile(labels, dtype=np.half)
 
@@ -164,16 +73,16 @@ class RFTrainDataset(Dataset):
         return len(self.offsets)
 
     def __getitem__(self, idx):
-        example = read_example(self.fd, self.ref_len, self.offsets[idx])
+        example = RFExample.from_file(self.fd, self.ref_len, self.offsets[idx])
 
-        signal = torch.tensor(example.signal).unfold(
+        signal = torch.tensor(example.data.signal).unfold(
             -1, self.block_size, self.block_size)  # Converting to blocks
 
-        bases = torch.tensor([ENCODING[b] for b in example.bases])
-        lengths = torch.tensor(example.lengths)
+        bases = torch.tensor([ENCODING.get(b, 4) for b in example.data.bases])
+        lengths = torch.tensor(example.data.event_lengths.astype(np.int32))
 
         ref_mapping = self.reference_mapping(lengths)
-        q_indices = torch.tensor(example.q_indices)
+        q_indices = torch.tensor(example.data.q_indices.astype(np.int32))
 
         #label = self.labels.get_label(example.read_id, self.ctgs[example.ctg],
         #                              example.pos)
@@ -202,9 +111,9 @@ class RFInferenceDataset(IterableDataset):
         self.path = path
         self.fd = None
         with open(self.path, 'rb') as fd:
-            self.ctgs = parse_ctgs(fd)
+            self.ctgs = RFHeader.parse_header(fd).ctgs
 
-        self.offsets = read_offsets2(f'{path}.idx')
+        self.offsets = read_offsets(f'{path}.idx')
         self.start = 0 if start_idx is None else start_idx
         self.end = len(self.offsets) if end_idx is None else end_idx
 
@@ -220,7 +129,7 @@ class RFInferenceDataset(IterableDataset):
             self.start])  # Moving to the starting example for this worker
 
         for _ in range(self.start, self.end):
-            example = read_example(self.fd, self.ref_len)
+            example = RFExample.from_file(self.fd, self.ref_len)
             bin = len(example.q_indices) // 10 - min_bin_idx
             bins[bin].append(example)
             stored += 1
@@ -253,20 +162,20 @@ class RFInferenceDataset(IterableDataset):
                 yield self.example_to_tensor(example)
 
     def example_to_tensor(
-        self, example: Example
+        self, example: RFExample
     ) -> Tuple[str, str, int, torch.Tensor, torch.Tensor, torch.Tensor,
                torch.Tensor]:
-        signal = torch.tensor(example.signal,
+        signal = torch.tensor(example.data.signal,
                               dtype=torch.half).unfold(-1, self.block_size,
                                                        self.block_size)
-        bases = torch.tensor([ENCODING.get(b, 4) for b in example.bases])
-        q_indices = torch.tensor(example.q_indices)
-        lengths = torch.tensor(example.lengths)
+        bases = torch.tensor([ENCODING.get(b, 4) for b in example.data.bases])
+        q_indices = torch.tensor(example.data.q_indices)
+        lengths = torch.tensor(example.data.event_lengths)
 
         r_pos_enc = self.mapping_encodings(lengths)
 
-        return example.read_id, self.ctgs[
-            example.ctg], example.pos, signal, bases, r_pos_enc, q_indices
+        return example.header.read_id, self.ctgs[
+            example.header.ctg_id], example.header.pos, signal, bases, r_pos_enc, q_indices
 
 
 def collate_fn_train(batch):
@@ -300,7 +209,7 @@ def worker_init_train_fn(worker_id: int) -> None:
     dataset = worker_info.dataset
 
     dataset.fd = open(dataset.path, 'rb')
-    dataset.ctgs = parse_ctgs(dataset.fd)
+    # dataset.ctgs = parse_ctgs(dataset.fd)
 
 
 def worker_init_rf_inference_fn(worker_id: int) -> None:

@@ -8,6 +8,9 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.utilities.cli import LightningCLI, LightningArgumentParser
+from jsonargparse import lazy_instance
+import wandb
+
 from datasets import RFDataModule
 from layers import SignalPositionalEncoding, PositionalEncoding, SignalEncoder, AlignmentDecoder
 
@@ -278,7 +281,8 @@ def get_trainer_defaults() -> Dict[str, Any]:
                                        mode='max')
     trainer_defaults['callbacks'] = [model_checkpoint]
 
-    wandb = WandbLogger(project='dna-mod', log_model=True, save_dir='wandb')
+    # wandb = WandbLogger(project='dna-mod', log_model=True, save_dir='wandb')
+    wandb = lazy_instance(WandbLogger, project='dna-mod', log_model=True, save_dir='wandb')
     trainer_defaults['logger'] = wandb
 
     return trainer_defaults

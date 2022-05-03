@@ -125,6 +125,22 @@ class RFExampleData:
         ) + self.event_lengths.tobytes() + str.encode(self.bases)
 
 
+@dataclass
+class RFExample:
+    header: RFExampleHeader
+    data: RFExampleData
+
+    @classmethod
+    def from_file(cls, fd: BufferedReader, seq_len: int, offset: Optional[int] = None) -> RFExample:
+        if offset is not None:
+            fd.seek(offset)
+
+        header = RFExampleHeader.parse_bytes(fd.read(EXAMPLE_HEADER_STRUCT.size))
+        data = RFExampleData.parse_bytes(fd.read(header.example_len(seq_len)), header, seq_len)
+
+        return cls(header, data)
+
+
 class DictLabels:
     def __init__(self, path: str) -> None:
         self.label_for_read = {}
