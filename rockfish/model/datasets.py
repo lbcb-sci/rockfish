@@ -130,7 +130,7 @@ class RFInferenceDataset(IterableDataset):
 
         for _ in range(self.start, self.end):
             example = RFExample.from_file(self.fd, self.ref_len)
-            bin = len(example.q_indices) // 10 - min_bin_idx
+            bin = len(example.data.q_indices) // 10 - min_bin_idx
             bins[bin].append(example)
             stored += 1
 
@@ -169,8 +169,8 @@ class RFInferenceDataset(IterableDataset):
                               dtype=torch.half).unfold(-1, self.block_size,
                                                        self.block_size)
         bases = torch.tensor([ENCODING.get(b, 4) for b in example.data.bases])
-        q_indices = torch.tensor(example.data.q_indices)
-        lengths = torch.tensor(example.data.event_lengths)
+        q_indices = torch.tensor(example.data.q_indices.astype(np.int32))
+        lengths = torch.tensor(example.data.event_lengths.astype(np.int32))
 
         r_pos_enc = self.mapping_encodings(lengths)
 
