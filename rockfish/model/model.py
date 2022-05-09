@@ -9,7 +9,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.utilities.cli import LightningCLI, LightningArgumentParser
 from jsonargparse import lazy_instance
-import wandb
+# import wandb
 
 from datasets import RFDataModule
 from layers import SignalPositionalEncoding, PositionalEncoding, SignalEncoder, AlignmentDecoder
@@ -45,6 +45,7 @@ class Rockfish(pl.LightningModule):
         self.save_hyperparameters()
 
         self.central_base = bases_len // 2
+        self.block_size = block_size
 
         if separate_unk_mask:
             self.mask_cls_label = 5
@@ -304,4 +305,5 @@ def cli_main():
 
 
 if __name__ == '__main__':
+    import wandb
     cli_main()
