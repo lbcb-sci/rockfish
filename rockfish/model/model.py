@@ -8,8 +8,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.utilities.cli import LightningCLI, LightningArgumentParser
-from jsonargparse import lazy_instance
-# import wandb
+import wandb
 
 from datasets import RFDataModule
 from layers import SignalPositionalEncoding, PositionalEncoding, SignalEncoder, AlignmentDecoder
@@ -18,6 +17,7 @@ from typing import *
 
 
 class Rockfish(pl.LightningModule):
+
     def __init__(self,
                  features: int = 256,
                  bases_len: int = 31,
@@ -282,14 +282,14 @@ def get_trainer_defaults() -> Dict[str, Any]:
                                        mode='max')
     trainer_defaults['callbacks'] = [model_checkpoint]
 
-    # wandb = WandbLogger(project='dna-mod', log_model=True, save_dir='wandb')
-    wandb = lazy_instance(WandbLogger, project='dna-mod', log_model=True, save_dir='wandb')
+    wandb = WandbLogger(project='dna-mod', log_model=True, save_dir='wandb')
     trainer_defaults['logger'] = wandb
 
     return trainer_defaults
 
 
 class RockfishLightningCLI(LightningCLI):
+
     def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
         parser.link_arguments('model.bases_len', 'data.ref_len')
         parser.link_arguments('model.block_size', 'data.block_size')
@@ -299,11 +299,10 @@ def cli_main():
     RockfishLightningCLI(
         Rockfish,
         RFDataModule,
-        seed_everything_default=42,  # 42 for first training, 43 self-distilation
+        # seed_everything_default=42,  # 42 for first training, 43 self-distilation
         save_config_overwrite=True,
         trainer_defaults=get_trainer_defaults())
 
 
 if __name__ == '__main__':
-    import wandb
     cli_main()

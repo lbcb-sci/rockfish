@@ -1,160 +1,98 @@
-import torch
-from torch.nn import DataParallel
-import torch.profiler
-from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import Dataset, DataLoader
-from tqdm import tqdm
+from torch.utils.data import IterableDataset
+import mappy
 
-import argparse
+from pathlib import Path
+import sys
+import traceback
 
-from datasets import read_offsets, parse_ctgs, read_example, MappingEncodings
-from model import Rockfish
+from rockfish.extract.extract import Example
+from rockfish.extract.main import *
 
-ENCODING = {b: i for i, b in enumerate('ACGT')}
+from typing import *
 
 
-def parse_gpus(string):
-    if string is None:
-        return None
+class ExampleBins:
 
-    gpus = string.strip().split(',')
-    return [int(g) for g in gpus]
+    def __init__(self,
+                 min_len: int,
+                 max_len: int,
+                 batch_size: int,
+                 storage_factor: int = 4,
+                 bin_range: int = 10) -> None:
+        self.offset = min_len // bin_range
+        n_bins = (max_len // bin_range) - self.offset + 1
 
+        self.bins = [[] for _ in range(n_bins)]
+        self.count = 0
 
-class RFDataset(Dataset):
-    def __init__(self, path: str, features: int, seq_len: int,
-                 block_size: int) -> None:
-        super(Dataset, self).__init__()
+        self.batch_size = batch_size
+        self.max_examples = batch_size * storage_factor
 
-        self.seq_len = seq_len
-        self.block_size = block_size
+    def add_example(self, example: Example) -> Iterator[Example]:
+        n_bin = len(example.q_indices) // 10 - self.offset
+        bin = self.bins[n_bin]
 
-        self.path = path
-        self.fd = None
-        self.ctgs = None
+        bin.append(example)
+        self.count += 1
 
-        self.offsets = read_offsets(f'{path}.idx')
+        if len(bin) >= self.batch_size:
+            self.bins[n_bin] = []
+            self.count -= len(bin)
 
-        self.mapping_encoding = MappingEncodings(features, self.seq_len,
-                                                 block_size)
+            return self.bins
 
-    def __len__(self):
-        return len(self.offsets)
+        if self.count >= self.max_examples:
+            return self.emit_batch()
 
-    def __getitem__(self, idx):
-        example = read_example(self.fd, self.offsets[idx], self.seq_len)
+    def emit_batch(self) -> Iterator[Example]:
+        batch_processed = 0
 
-        signal = torch.tensor(example.signal).unfold(
-            -1, self.block_size, self.block_size)  # Converting to blocks
+        for bin in self.bins:
+            while len(bin) > 0 and batch_processed < self.batch_size:
+                example = bin.pop()
 
-        bases = torch.tensor([ENCODING[b] for b in example.bases])
-        q_indices = torch.tensor(example.q_indices)
-        lengths = torch.tensor(example.lengths)
+                batch_processed += 1
+                self.count -= 1
 
-        r_pos_enc, q_pos_enc = self.mapping_encoding(lengths, q_indices)
-
-        return example.read_id, self.ctgs[
-            example.ctg], example.pos, signal, bases, r_pos_enc, q_pos_enc
-
-
-def collate_fn(batch):
-    read_ids, ctgs, poss, signals, bases, q_indices, lengths = zip(*batch)
-    signals = pad_sequence(signals, batch_first=True)  # BxMAX_LEN
-    q_indices = pad_sequence(q_indices, batch_first=True)  # [B,MAX_LEN//5]
-
-    return read_ids, ctgs, poss, signals, torch.stack(
-        bases, 0), q_indices, torch.stack(lengths, 0)
+                yield example
 
 
-def collate_fn(batch):
-    read_ids, ctgs, poss, signals, bases, r_pos_enc, q_pos_enc = zip(*batch)
+class Fast5Dataset(IterableDataset):
 
-    num_blocks = torch.tensor([len(s) for s in signals])  # B
-    signals = pad_sequence(signals,
-                           batch_first=True)  # [B, MAX_LEN, BLOCK_SIZE]
-    r_pos_enc = pad_sequence(r_pos_enc, batch_first=True)  # [B, MAX_LEN, E//4]
-    q_pos_enc = pad_sequence(q_pos_enc, batch_first=True)  # [B, MAX_LEN, E//4]
+    def __init__(self, files: List[Path], ref_positions: MotifPositions,
+                 aligner: mappy.Aligner, window: int, mapq_filter: int,
+                 unique_aln: bool) -> None:
+        super().__init__()
 
-    return read_ids, ctgs, poss, signals, torch.stack(
-        bases, 0), r_pos_enc, q_pos_enc, num_blocks
+        self.files = files
+        self.ref_positions = ref_positions
+        self.aligner = aligner
+        self.window = window
+        self.mapq_filter = mapq_filter
+        self.unique_aln = unique_aln
 
+    def __iter__(self):
+        self.bins = ExampleBins()
 
-def worker_init_fn(worker_id: int) -> None:
-    worker_info = torch.utils.data.get_worker_info()
-    dataset = worker_info.dataset
+        buffer = mappy.ThreadBuffer()
+        for file in self.files:
+            for read in get_reads(file):
+                try:
+                    read_info = load_read(read)
+                except Exception as e:
+                    print(f'Cannot load read from file {file}.',
+                          file=sys.stderr)
+                    traceback.print_exc()
+                    sys.exit(-1)
 
-    dataset.fd = open(dataset.path, 'rb')
-    dataset.ctgs = parse_ctgs(dataset.fd)
-
-
-@torch.no_grad()
-def inference(args):
-    model = Rockfish.load_from_checkpoint(args.ckpt_path).eval()
-
-    gpus = parse_gpus(args.gpus) if args.gpus is not None else None
-    if gpus is not None and torch.cuda.is_available():
-        device = torch.device(f'cuda:{gpus[0]}')
-        if len(gpus) > 1:
-            model = DataParallel(model, device_ids=gpus)
-    else:
-        device = torch.device('cpu')
-    model.to(device)
-
-    data = RFDataset(args.data_path, 384, 31, 5)
-    if args.workers == 0:
-        data.fd = open(data.path, 'rb')
-        data.ctgs = parse_ctgs(data.fd)
-
-    loader = DataLoader(data,
-                        args.batch,
-                        False,
-                        num_workers=args.workers,
-                        collate_fn=collate_fn,
-                        worker_init_fn=worker_init_fn,
-                        pin_memory=True)
-
-    with open(
-            args.output, 'w'
-    ) as f, tqdm(total=len(data)) as pbar, torch.profiler.profile(
-            schedule=torch.profiler.schedule(wait=3,
-                                             warmup=3,
-                                             active=10,
-                                             repeat=2),
-            on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                '/raid-ssd/stanojevicd/dna-mod/NA12878/no_tombo/log/rockfish'),
-            record_shapes=True,
-            with_stack=True) as prof:
-        for i, (ids, ctgs, poss, signals, bases, r_pos_enc, q_pos_enc,
-                num_blocks) in enumerate(loader):
-            if i >= (3 + 3 + 10) * 2:
-                break
-
-            signals, bases, r_pos_enc, q_pos_enc, num_blocks = (
-                signals.to(device), bases.to(device), r_pos_enc.to(device),
-                q_pos_enc.to(device), num_blocks.to(device))
-
-            logits = model(signals, bases, r_pos_enc, q_pos_enc,
-                           num_blocks).cpu().numpy()  # N
-
-            for id, ctg, pos, logit in zip(ids, ctgs, poss, logits):
-                print(id, ctg, pos, logit, file=f, sep='\t')
-            pbar.update(len(logits))
-            prof.step()
-
-
-def get_arguments():
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument('data_path', type=str)
-    parser.add_argument('ckpt_path', type=str)
-    parser.add_argument('-o', '--output', type=str, default='preditions.tsv')
-    parser.add_argument('-d', '--gpus', default=None)
-    parser.add_argument('-t', '--workers', type=int, default=0)
-    parser.add_argument('-b', '--batch', type=int, default=1)
-
-    return parser.parse_args()
-
-
-if __name__ == '__main__':
-    args = get_arguments()
-    inference(args)
+                try:
+                    read_info = load_read(read)
+                    _, examples = extract_features(
+                        read_info, self.ref_positions, self.aligner, buffer,
+                        self.window, self.mapq_filter, self.unique_aln)
+                except Exception as e:
+                    print(
+                        f'Cannot process read {read_info.read_id} from file {file}.',
+                        file=sys.stderr)
+                    traceback.print_exc()
+                    sys.exit(-1)

@@ -143,7 +143,7 @@ class RFInferenceDataset(IterableDataset):
             elif stored >= 4 * self.batch_size:  # Stored too many examples, emit some
                 batch_processed = 0
 
-                for bin in reversed(bins):
+                for bin in bins:
                     while len(bin) > 0:
                         example = bin.pop()
                         yield self.example_to_tensor(example)
