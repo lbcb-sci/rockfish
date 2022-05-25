@@ -29,24 +29,6 @@ def parse_gpus(string: str) -> List[int]:
     return [int(g) for g in gpus]
 
 
-def example_to_tensor(
-    self, example: Example
-) -> Tuple[str, str, int, torch.Tensor, torch.Tensor, torch.Tensor,
-           torch.Tensor]:
-    signal = torch.tensor(example.signal,
-                          dtype=torch.half).unfold(-1, self.block_size,
-                                                   self.block_size)
-    bases = torch.tensor([ENCODING.get(b, 4) for b in example.data.bases])
-    q_indices = torch.tensor(example.data.q_indices.astype(np.int32))
-    lengths = torch.tensor(example.data.event_lengths.astype(np.int32))
-
-    r_pos_enc = self.mapping_encodings(lengths)
-
-    return example.header.read_id, self.ctgs[
-        example.header.
-        ctg_id], example.header.pos, signal, bases, r_pos_enc, q_indices
-
-
 class ExampleBins:
 
     def __init__(self,
