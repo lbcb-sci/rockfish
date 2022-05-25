@@ -24,10 +24,10 @@ class AlignmentInfo(Enum):
     MAPQ_FAIL = 3
 
 
-def align_read(query: str, aligner: mappy.Aligner, mapq_filter: int,
-               unique_filter: bool,
+def align_read(query: str, aligner: mappy.Aligner, buffer: mappy.ThreadBuffer,
+               mapq_filter: int, unique_filter: bool,
                read_id: str) -> Tuple[AlignmentInfo, Optional[AlignmentData]]:
-    alignments = list(aligner.map(query))
+    alignments = list(aligner.map(query, buf=buffer))
     if not alignments:
         return AlignmentInfo.NO_ALIGNMENT, None
     if unique_filter and len(alignments) > 1:
@@ -42,7 +42,7 @@ def align_read(query: str, aligner: mappy.Aligner, mapq_filter: int,
         alignment.cigar)
     rpos, qpos = 0, alignment.q_st  # if alignment.strand == 1 else len(query) - alignment.q_en
 
-    ref_to_query = np.empty((ref_len + 1, ), dtype=int)
+    ref_to_query = np.empty((ref_len + 1,), dtype=int)
     for length, op in cigar:
         if op == 0 or op == 7 or op == 8:  # Match or mismatch
             rend = rpos + length

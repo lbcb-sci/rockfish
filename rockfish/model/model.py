@@ -102,6 +102,16 @@ class Rockfish(pl.LightningModule):
 
         return torch.cat(code_logits, dim=0), masks
 
+    def mask_signal2(self, signal, padding_mask):
+        mask = torch.rand(*signal.shape[:2],
+                          device=self.device) < self.hparams.signal_mask_prob
+        mask &= ~padding_mask
+
+        c_logits = self.codebook(signal[mask])
+        signal[mask] = 0.
+
+        return c_logits, mask
+
     def get_context_code_probs(self, signal, masks):
         code_logits = []
         for i, m in enumerate(masks):
@@ -109,6 +119,9 @@ class Rockfish(pl.LightningModule):
             code_logits.append(c_logits)
 
         return torch.cat(code_logits, dim=0)
+
+    def get_context_code_probs2(self, signal, masks):
+        return self.codebook(signal[masks])
 
     def forward(self, signal, r_pos_enc, q_pos_enc, bases, num_blocks):
         B, S, _ = signal.shape
@@ -140,13 +153,13 @@ class Rockfish(pl.LightningModule):
 
         signal = self.signal_embedding(signal)  # BxSxE
 
+        signal_mask = self.create_padding_mask(num_blocks, S)  # BxS_out
+
         signal_code_logits, masks = None, None
         if self.hparams.signal_mask_prob > 1e-6:
-            signal_code_logits, masks = self.mask_signal(signal, num_blocks)
+            signal_code_logits, masks = self.mask_signal2(signal, signal_mask)
 
         signal = self.signal_pe(signal, r_pos_enc, q_pos_enc, masks)
-
-        signal_mask = self.create_padding_mask(num_blocks, S)  # BxS_out
 
         signal = self.signal_encoder(signal, signal_mask)
         signal = self.signal_norm(signal)
@@ -157,7 +170,7 @@ class Rockfish(pl.LightningModule):
 
         context_code_logits = None
         if self.hparams.signal_mask_prob > 1e-6:
-            context_code_logits = self.get_context_code_probs(signal, masks)
+            context_code_logits = self.get_context_code_probs2(signal, masks)
 
         bases = self.bases_norm(bases)  # BxTxE
         x = bases[:, self.central_base]

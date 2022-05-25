@@ -7,7 +7,7 @@ import re
 from typing import *
 
 from .fast5 import ReadInfo
-from .alignment import AlignmentData, align_read
+from .alignment import AlignmentData, AlignmentInfo, align_read
 
 MotifPositions = Dict[str, Tuple[Set[int], Set[int]]]
 
@@ -31,8 +31,7 @@ def build_reference_idx(aligner: mappy.Aligner, motif: str,
         sequence = aligner.seq(contig)
 
         fwd_pos = {
-            m.start() + rel_idx
-            for m in re.finditer(motif, sequence, re.I)
+            m.start() + rel_idx for m in re.finditer(motif, sequence, re.I)
         }
 
         rev_comp = mappy.revcomp(sequence)
@@ -41,8 +40,7 @@ def build_reference_idx(aligner: mappy.Aligner, motif: str,
             return len(sequence) - (i + rel_idx) - 1
 
         rev_pos = {
-            pos_for_rev(m.start())
-            for m in re.finditer(motif, rev_comp, re.I)
+            pos_for_rev(m.start()) for m in re.finditer(motif, rev_comp, re.I)
         }
 
         positions[contig] = (fwd_pos, rev_pos)
@@ -76,16 +74,17 @@ def get_event_length(position: int, ref_to_query: np.ndarray,
 
 
 def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
-                     aligner: mappy.Aligner, window: int, mapq_filter: int,
-                     unique_aln: bool) -> List[Example]:
+                     aligner: mappy.Aligner, buffer: mappy.ThreadBuffer,
+                     window: int, mapq_filter: int,
+                     unique_aln: bool) -> Tuple[AlignmentInfo, List[Example]]:
     seq_to_sig = read_info.get_seq_to_sig()
     signal = read_info.get_normalized_signal(end=seq_to_sig[-1]) \
                         .astype(np.half)
     query, _ = read_info.get_seq_and_quals()
     example_bases = (2 * window) + 1
 
-    status, aln_data = align_read(query, aligner, mapq_filter, unique_aln,
-                                  read_info.read_id)
+    status, aln_data = align_read(query, aligner, buffer, mapq_filter,
+                                  unique_aln, read_info.read_id)
     if aln_data is None:
         return status, None
 

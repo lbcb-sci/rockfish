@@ -45,14 +45,16 @@ def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
                       2 * window + 1) as writer:
         writer.write_header()
 
+        buffer = mappy.ThreadBuffer()
         while (path := in_queue.get()) is not None:
             status_count = Counter({e.name: 0 for e in AlignmentInfo})
             for read in get_reads(path):
                 try:
                     read_info = load_read(read)
-                    status, examples = extract_features(
-                        read_info, ref_positions, aligner, window, mapq_filter,
-                        unique_aln)
+                    status, examples = extract_features(read_info,
+                                                        ref_positions, aligner,
+                                                        buffer, window,
+                                                        mapq_filter, unique_aln)
 
                     if examples is not None:
                         writer.write_examples(examples)
