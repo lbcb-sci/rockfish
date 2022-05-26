@@ -3,6 +3,7 @@ import torch
 from torch.functional import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.init import xavier_uniform_
 from torch.nn.utils.rnn import pad_sequence
 
 import math
@@ -287,6 +288,13 @@ class AlignmentDecoder(nn.Module):
 
         return bases
 
+    def _reset_parameters(self):
+        r"""Initiate parameters in the transformer model."""
+
+        for p in self.parameters():
+            if p.dim() > 1:
+                xavier_uniform_(p)
+
 
 class SignalEncoder(nn.Module):
 
@@ -308,3 +316,10 @@ class SignalEncoder(nn.Module):
             signal = layer(signal, signal_mask)
 
         return signal
+
+    def _reset_parameters(self):
+        r"""Initiate parameters in the transformer model."""
+
+        for p in self.parameters():
+            if p.dim() > 1:
+                xavier_uniform_(p)
