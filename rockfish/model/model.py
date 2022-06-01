@@ -76,7 +76,7 @@ class Rockfish(pl.LightningModule):
         self.bases_norm = nn.LayerNorm(features)
 
         self.fc_mod = nn.Linear(features, 1)
-        self.fc_mask = nn.Linear(features, 5)
+        self.fc_mask = nn.Linear(features, self.mask_cls_label)
 
         if track_metrics:
             self.val_acc = Accuracy()

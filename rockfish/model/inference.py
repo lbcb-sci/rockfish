@@ -179,7 +179,10 @@ def main(args: argparse.Namespace) -> None:
     gpus = parse_gpus(args.gpus) if args.gpus is not None else None
     device = 'cpu' if gpus is None else gpus[0]
 
-    model = Rockfish.load_from_checkpoint(args.model_path, track_metrics=False)
+    model = Rockfish.load_from_checkpoint(
+        args.model_path,
+        track_metrics=False,
+        separate_unk_mask=not args.combined_mask)
     if gpus is None:
         model = model.to('cpu')
     if len(gpus) == 1:
@@ -241,6 +244,7 @@ def get_arguments() -> argparse.Namespace:
     parser.add_argument('-d', '--gpus', default=None)
     parser.add_argument('-t', '--workers', type=int, default=1)
     parser.add_argument('-b', '--batch_size', type=int, default=4096)
+    parser.add_argument('--combined_mask', action='store_true')
 
     parser.add_argument('-o', '--output', type=str, default='predictions.tsv')
 

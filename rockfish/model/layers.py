@@ -160,8 +160,8 @@ class SignalPositionalEncoding(nn.Module):
         x[:, :, 0::4] += self.pe_cos[:S]
         x[:, :, 1::4] += self.pe_sin[:S]
 
-        x[:, :, 2::4] += r_pos_enc.unsqueeze(-1) * self.div_term
-        x[:, :, 3::4] += q_pos_enc.unsqueeze(-1) * self.div_term
+        x[:, :, 2::4] += torch.cos(r_pos_enc.unsqueeze(-1) * self.div_term)
+        x[:, :, 3::4] += torch.cos(q_pos_enc.unsqueeze(-1) * self.div_term)
 
         return self.dropout(x)
 
