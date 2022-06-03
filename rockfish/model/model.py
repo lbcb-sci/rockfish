@@ -233,7 +233,7 @@ class Rockfish(pl.LightningModule):
         return signal_mask_loss, diversity_loss, signal_mask_targets
 
     def training_step(self, batch, batch_idx):
-        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels = batch
+        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, w = batch
 
         bases_mask = None
         if self.hparams.bases_mask_prob > 1e-6:
@@ -248,7 +248,8 @@ class Rockfish(pl.LightningModule):
             bases_mask=bases_mask)
 
         mod_loss = F.binary_cross_entropy_with_logits(mod_logits,
-                                                      labels.float())
+                                                      labels.float(),
+                                                      weight=w)
 
         loss = mod_loss
         self.log('train_mod_loss', mod_loss)
@@ -275,10 +276,12 @@ class Rockfish(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels = batch
+        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, w = batch
 
         logits = self(signals, r_pos_enc, q_pos_enc, bases, num_blocks)
-        loss = F.binary_cross_entropy_with_logits(logits, labels.float())
+        loss = F.binary_cross_entropy_with_logits(logits,
+                                                  labels.float(),
+                                                  weight=w)
 
         self.log('val_loss', loss, prog_bar=True)
         self.log('val_acc',

@@ -14,7 +14,6 @@ from typing import *
 
 from rockfish.rf_format import *
 
-
 ENCODING = {b: i for i, b in enumerate('ACGTN')}
 
 
@@ -29,7 +28,7 @@ def read_offsets(idx_path: str) -> List[int]:
         n_examples = int.from_bytes(f.read(4), byteorder=sys.byteorder)
         start = int.from_bytes(f.read(4), byteorder=sys.byteorder)
 
-        data = np.empty((n_examples + 1, ), dtype=int)
+        data = np.empty((n_examples + 1,), dtype=int)
         data[0] = start
         data[1:] = np.fromfile(f, dtype=np.ushort)
 
@@ -38,6 +37,7 @@ def read_offsets(idx_path: str) -> List[int]:
 
 
 class ReferenceMapping:
+
     def __init__(self, ref_len: int, block_size: int) -> None:
         self.block_size = block_size
         self.r_pos = torch.arange(0, ref_len)  # T
@@ -52,6 +52,7 @@ class ReferenceMapping:
 
 
 class RFTrainDataset(Dataset):
+
     def __init__(self, path: str, labels: str, ref_len: int,
                  block_size: int) -> None:
         super(Dataset, self).__init__()
@@ -88,10 +89,13 @@ class RFTrainDataset(Dataset):
         #                              example.pos)
         label = self.labels[idx]
 
-        return signal, ref_mapping, q_indices, bases, label
+        w = 1.1 if example.data.bases.count('CG') == 1 else 1.
+
+        return signal, ref_mapping, q_indices, bases, label, w
 
 
 class RFInferenceDataset(IterableDataset):
+
     def __init__(self,
                  path: str,
                  batch_size: int,
@@ -105,8 +109,7 @@ class RFInferenceDataset(IterableDataset):
         self.ref_len = ref_len
         self.block_size = block_size
 
-        self.mapping_encodings = ReferenceMapping(self.ref_len,
-                                                  self.block_size)
+        self.mapping_encodings = ReferenceMapping(self.ref_len, self.block_size)
 
         self.path = path
         self.fd = None
@@ -175,11 +178,12 @@ class RFInferenceDataset(IterableDataset):
         r_pos_enc = self.mapping_encodings(lengths)
 
         return example.header.read_id, self.ctgs[
-            example.header.ctg_id], example.header.pos, signal, bases, r_pos_enc, q_indices
+            example.header.
+            ctg_id], example.header.pos, signal, bases, r_pos_enc, q_indices
 
 
 def collate_fn_train(batch):
-    signals, ref_mapping, q_pos_enc, bases, labels = zip(*batch)
+    signals, ref_mapping, q_pos_enc, bases, labels, w = zip(*batch)
 
     num_blocks = torch.tensor([len(s) for s in signals])  # B
     signals = pad_sequence(signals,
@@ -188,7 +192,7 @@ def collate_fn_train(batch):
     q_pos_enc = pad_sequence(q_pos_enc, batch_first=True)  # [B, MAX_LEN]
 
     return signals, ref_mapping, q_pos_enc, torch.stack(
-        bases, 0), num_blocks, torch.tensor(labels)
+        bases, 0), num_blocks, torch.tensor(labels), torch.tensor(w)
 
 
 def collate_fn_inference(batch):
@@ -217,14 +221,14 @@ def worker_init_rf_inference_fn(worker_id: int) -> None:
     dataset = worker_info.dataset
 
     total_examples = dataset.end - dataset.start
-    per_worker = int(math.ceil(total_examples /
-                               float(worker_info.num_workers)))
+    per_worker = int(math.ceil(total_examples / float(worker_info.num_workers)))
 
     dataset.start += worker_id * per_worker
     dataset.end = min(dataset.start + per_worker, dataset.end)
 
 
 class RFDataModule(pl.LightningDataModule):
+
     def __init__(self,
                  train_data: str,
                  train_labels: str,
