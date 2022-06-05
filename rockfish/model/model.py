@@ -81,6 +81,8 @@ class Rockfish(pl.LightningModule):
         if track_metrics:
             self.val_acc = Accuracy()
             self.val_ap = AveragePrecision()
+            self.ns_acc = Accuracy()
+            self.s_acc = Accuracy()
 
     def create_padding_mask(self, num_blocks, blocks_len):
         repeats = torch.arange(0, blocks_len, device=num_blocks.device)  # S
@@ -284,18 +286,25 @@ class Rockfish(pl.LightningModule):
                                                   weight=w)
 
         self.log('val_loss', loss, prog_bar=True)
-        self.log('val_acc',
-                 self.val_acc(logits, (labels > 0.5).int()),
-                 prog_bar=True)
+
+        targets = (labels > 0.5).int()
+        self.log('val_acc', self.val_acc(logits, targets), prog_bar=True)
         self.log('val_ap', self.val_ap(logits, labels))
+
+        ns_mask = (w - 1.) < 1e-7
+        self.log('non_singleton_acc',
+                 self.ns_acc(logits[ns_mask], targets[ns_mask]))
+
+        s_mask = ~ns_mask
+        self.log('singleton_acc', self.val_acc(logits[s_mask], targets[s_mask]))
 
 
 def get_trainer_defaults() -> Dict[str, Any]:
     trainer_defaults = {}
 
-    model_checkpoint = ModelCheckpoint(monitor='val_acc',
+    model_checkpoint = ModelCheckpoint(monitor='val_loss',
                                        save_top_k=3,
-                                       mode='max')
+                                       mode='min')
     trainer_defaults['callbacks'] = [model_checkpoint]
 
     wandb = WandbLogger(project='dna-mod', log_model=True, save_dir='wandb')

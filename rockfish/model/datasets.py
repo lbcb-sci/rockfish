@@ -89,7 +89,7 @@ class RFTrainDataset(Dataset):
         #                              example.pos)
         label = self.labels[idx]
 
-        w = 1.1 if example.data.bases.count('CG') == 1 else 1.
+        w = 1.2 if example.data.bases.count('CG') == 1 else 1.
 
         return signal, ref_mapping, q_indices, bases, label, w
 
