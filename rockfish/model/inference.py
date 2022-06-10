@@ -183,17 +183,21 @@ def main(args: argparse.Namespace) -> None:
         args.model_path,
         track_metrics=False,
         separate_unk_mask=not args.combined_mask)
+
+    block_size = model.block_size
+
     if gpus is None:
         model = model.to('cpu')
     if len(gpus) == 1:
         model = model.to(device)
     else:
         model = DataParallel(model, gpus)
+        model.to(device)
     model.eval()
 
     dataset = Fast5Dataset(files, ref_positions, aligner, args.window,
                            args.mapq_filter, args.unique_aln, args.batch_size,
-                           model.block_size)
+                           block_size)
     loader = DataLoader(dataset,
                         batch_size=args.batch_size,
                         num_workers=args.workers,

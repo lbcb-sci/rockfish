@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchmetrics import Accuracy, AveragePrecision
+from torchmetrics import Accuracy, AveragePrecision, F1Score
 from torchmetrics.functional import accuracy as acc
 
 import pytorch_lightning as pl
@@ -83,6 +83,7 @@ class Rockfish(pl.LightningModule):
             self.val_ap = AveragePrecision()
             self.ns_acc = Accuracy()
             self.s_acc = Accuracy()
+            self.f1 = F1Score()
 
     def create_padding_mask(self, num_blocks, blocks_len):
         repeats = torch.arange(0, blocks_len, device=num_blocks.device)  # S
@@ -297,6 +298,8 @@ class Rockfish(pl.LightningModule):
 
         s_mask = ~ns_mask
         self.log('singleton_acc', self.val_acc(logits[s_mask], targets[s_mask]))
+
+        self.log('f1-score', self.f1(logits, targets))
 
 
 def get_trainer_defaults() -> Dict[str, Any]:
