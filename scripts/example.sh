@@ -1,5 +1,5 @@
 # Download data from Nanopolish
-#wget http://s3.climb.ac.uk/nanopolish_tutorial/methylation_example.tar.gz
+wget http://s3.climb.ac.uk/nanopolish_tutorial/methylation_example.tar.gz
 tar -xzf methylation_example.tar.gz
 cd methylation_example
 

@@ -9,8 +9,8 @@ import argparse
 import fileinput
 from contextlib import ExitStack
 
-from datasets import *
-from model import Rockfish
+from .datasets import *
+from .model import Rockfish
 
 from typing import *
 
