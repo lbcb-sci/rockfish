@@ -89,9 +89,9 @@ class RFTrainDataset(Dataset):
         #                              example.pos)
         label = self.labels[idx]
 
-        w = 1.2 if example.data.bases.count('CG') == 1 else 1.
+        singleton = True if example.data.bases.count('CG') == 1 else False
 
-        return signal, ref_mapping, q_indices, bases, label, w
+        return signal, ref_mapping, q_indices, bases, label, singleton
 
 
 class RFInferenceDataset(IterableDataset):
@@ -183,7 +183,7 @@ class RFInferenceDataset(IterableDataset):
 
 
 def collate_fn_train(batch):
-    signals, ref_mapping, q_pos_enc, bases, labels, w = zip(*batch)
+    signals, ref_mapping, q_pos_enc, bases, labels, singleton = zip(*batch)
 
     num_blocks = torch.tensor([len(s) for s in signals])  # B
     signals = pad_sequence(signals,
@@ -192,7 +192,7 @@ def collate_fn_train(batch):
     q_pos_enc = pad_sequence(q_pos_enc, batch_first=True)  # [B, MAX_LEN]
 
     return signals, ref_mapping, q_pos_enc, torch.stack(
-        bases, 0), num_blocks, torch.tensor(labels), torch.tensor(w)
+        bases, 0), num_blocks, torch.tensor(labels), singleton
 
 
 def collate_fn_inference(batch):

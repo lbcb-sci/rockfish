@@ -8,10 +8,9 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.utilities.cli import LightningCLI, LightningArgumentParser
-import wandb
 
-from datasets import RFDataModule
-from layers import SignalPositionalEncoding, PositionalEncoding, SignalEncoder, AlignmentDecoder
+from .datasets import RFDataModule
+from .layers import SignalPositionalEncoding, PositionalEncoding, SignalEncoder, AlignmentDecoder
 
 from typing import *
 
@@ -36,7 +35,8 @@ class Rockfish(pl.LightningModule):
                  alpha: float = 0.1,
                  max_block_multiplier: int = 4,
                  separate_unk_mask: bool = True,
-                 track_metrics: bool = True) -> None:
+                 track_metrics: bool = True,
+                 singleton_weight: float = 1.2) -> None:
         super(Rockfish, self).__init__()
 
         if dim_ff is None:
@@ -46,6 +46,8 @@ class Rockfish(pl.LightningModule):
 
         self.central_base = bases_len // 2
         self.block_size = block_size
+        self.bases_mask_task = True if self.hparams.bases_mask_prob > 1e-6 else False
+        self.signal_mask_task = True if self.hparams.signal_mask_prob > 1e-6 else False
 
         if separate_unk_mask:
             self.mask_cls_label = 5
@@ -54,7 +56,7 @@ class Rockfish(pl.LightningModule):
 
         self.signal_embedding = nn.Linear(block_size, features)
 
-        if self.hparams.signal_mask_prob > 1e-6:
+        if self.signal_mask_task:
             self.codebook = nn.Linear(features, codebook_size, bias=False)
             self.max_codebook_entropy = Rockfish.entropy(
                 torch.tensor([1. / codebook_size] * codebook_size))
@@ -76,7 +78,9 @@ class Rockfish(pl.LightningModule):
         self.bases_norm = nn.LayerNorm(features)
 
         self.fc_mod = nn.Linear(features, 1)
-        self.fc_mask = nn.Linear(features, self.mask_cls_label)
+
+        if self.bases_mask_task:
+            self.fc_mask = nn.Linear(features, self.mask_cls_label)
 
         if track_metrics:
             self.val_acc = Accuracy()
@@ -91,21 +95,7 @@ class Rockfish(pl.LightningModule):
 
         return repeats >= num_blocks.unsqueeze(-1)
 
-    def mask_signal(self, signal, num_blocks):
-        code_logits, masks = [], []
-        for i in range(signal.shape[0]):
-            mask = torch.rand(
-                num_blocks[i],
-                device=self.device) < self.hparams.signal_mask_prob
-            masks.append(mask)
-
-            c_logits = self.codebook(signal[i, :num_blocks[i]][mask])  # mxK
-            code_logits.append(c_logits)
-            signal[i, :num_blocks[i]][mask] = 0.  # self.signal_mask
-
-        return torch.cat(code_logits, dim=0), masks
-
-    def mask_signal2(self, signal, padding_mask):
+    def mask_signal(self, signal, padding_mask):
         mask = torch.rand(*signal.shape[:2],
                           device=self.device) < self.hparams.signal_mask_prob
         mask &= ~padding_mask
@@ -116,14 +106,6 @@ class Rockfish(pl.LightningModule):
         return c_logits, mask
 
     def get_context_code_probs(self, signal, masks):
-        code_logits = []
-        for i, m in enumerate(masks):
-            c_logits = self.codebook(signal[i, :len(m)][m])
-            code_logits.append(c_logits)
-
-        return torch.cat(code_logits, dim=0)
-
-    def get_context_code_probs2(self, signal, masks):
         return self.codebook(signal[masks])
 
     def forward(self, signal, r_pos_enc, q_pos_enc, bases, num_blocks):
@@ -159,8 +141,8 @@ class Rockfish(pl.LightningModule):
         signal_mask = self.create_padding_mask(num_blocks, S)  # BxS_out
 
         signal_code_logits, masks = None, None
-        if self.hparams.signal_mask_prob > 1e-6:
-            signal_code_logits, masks = self.mask_signal2(signal, signal_mask)
+        if self.signal_mask_task:
+            signal_code_logits, masks = self.mask_signal(signal, signal_mask)
 
         signal = self.signal_pe(signal, r_pos_enc, q_pos_enc, masks)
 
@@ -172,8 +154,8 @@ class Rockfish(pl.LightningModule):
         bases = self.alignment_decoder(bases, signal, signal_mask)
 
         context_code_logits = None
-        if self.hparams.signal_mask_prob > 1e-6:
-            context_code_logits = self.get_context_code_probs2(signal, masks)
+        if self.signal_mask_task:
+            context_code_logits = self.get_context_code_probs(signal, masks)
 
         bases = self.bases_norm(bases)  # BxTxE
         x = bases[:, self.central_base]
@@ -236,10 +218,13 @@ class Rockfish(pl.LightningModule):
         return signal_mask_loss, diversity_loss, signal_mask_targets
 
     def training_step(self, batch, batch_idx):
-        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, w = batch
+        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, singleton = batch
+        loss_weights = torch.tensor(
+            [self.hparams.singleton_weight if s else 1. for s in singleton],
+            device=self.device)
 
         bases_mask = None
-        if self.hparams.bases_mask_prob > 1e-6:
+        if self.bases_mask_task:
             bases, bases_mask, target_bases = self.bases_masking(bases)
 
         mod_logits, mask_logits, signal_code_logits, context_code_logits = self.forward_train(
@@ -252,7 +237,7 @@ class Rockfish(pl.LightningModule):
 
         mod_loss = F.binary_cross_entropy_with_logits(mod_logits,
                                                       labels.float(),
-                                                      weight=w)
+                                                      weight=loss_weights)
 
         loss = mod_loss
         self.log('train_mod_loss', mod_loss)
@@ -279,12 +264,15 @@ class Rockfish(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, w = batch
+        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, singleton = batch
+        loss_weights = torch.tensor(
+            [self.hparams.singleton_weight if s else 1. for s in singleton],
+            device=self.device)
 
         logits = self(signals, r_pos_enc, q_pos_enc, bases, num_blocks)
         loss = F.binary_cross_entropy_with_logits(logits,
                                                   labels.float(),
-                                                  weight=w)
+                                                  weight=loss_weights)
 
         self.log('val_loss', loss, prog_bar=True)
 
@@ -292,12 +280,11 @@ class Rockfish(pl.LightningModule):
         self.log('val_acc', self.val_acc(logits, targets), prog_bar=True)
         self.log('val_ap', self.val_ap(logits, labels))
 
-        ns_mask = (w - 1.) < 1e-7
         self.log('non_singleton_acc',
-                 self.ns_acc(logits[ns_mask], targets[ns_mask]))
+                 self.ns_acc(logits[~singleton], targets[~singleton]))
 
-        s_mask = ~ns_mask
-        self.log('singleton_acc', self.val_acc(logits[s_mask], targets[s_mask]))
+        self.log('singleton_acc',
+                 self.val_acc(logits[singleton], targets[singleton]))
 
         self.log('f1-score', self.f1(logits, targets))
 
@@ -324,12 +311,10 @@ class RockfishLightningCLI(LightningCLI):
 
 
 def cli_main():
-    RockfishLightningCLI(
-        Rockfish,
-        RFDataModule,
-        # seed_everything_default=42,  # 42 for first training, 43 self-distilation
-        save_config_overwrite=True,
-        trainer_defaults=get_trainer_defaults())
+    RockfishLightningCLI(Rockfish,
+                         RFDataModule,
+                         save_config_overwrite=True,
+                         trainer_defaults=get_trainer_defaults())
 
 
 if __name__ == '__main__':

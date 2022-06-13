@@ -30,6 +30,7 @@ def inference_worker(args: argparse.Namespace, gpu: Optional[int],
         'cpu')
 
     model = Rockfish.load_from_checkpoint(args.ckpt_path,
+                                          strict=False,
                                           track_metrics=False).to(device)
     model.eval()
 
@@ -109,67 +110,10 @@ def main(args: argparse.Namespace) -> None:
         os.remove(path)
 
 
-@torch.no_grad()
-def inference(args: argparse.Namespace) -> None:
-    model = Rockfish.load_from_checkpoint(args.ckpt_path)
-    model.eval()
-    model.freeze()
-
-    ref_len = model.hparams.bases_len
-    block_size = model.block_size
-
-    gpus = parse_gpus(args.gpus) if args.gpus is not None else None
-    if gpus is not None and torch.cuda.is_available():
-        device = torch.device(f'cuda:{gpus[0]}')
-        if len(gpus) > 1:
-            model = DataParallel(model, device_ids=gpus)
-    else:
-        device = torch.device('cpu')
-    model.to(device)
-
-    data = RFInferenceDataset(args.data_path,
-                              args.batch_size,
-                              ref_len=ref_len,
-                              block_size=block_size)
-    loader = DataLoader(data,
-                        args.batch_size,
-                        False,
-                        num_workers=args.workers,
-                        collate_fn=collate_fn_inference,
-                        worker_init_fn=worker_init_rf_inference_fn,
-                        pin_memory=True)
-
-    with open(args.output, 'w') as f, tqdm(
-            total=len(data.offsets)) as pbar, torch.cuda.amp.autocast():
-        for ids, ctgs, poss, signals, bases, r_pos_enc, q_indices, num_blocks in loader:
-            signals, bases, r_pos_enc, q_indices, num_blocks = (
-                signals.to(device), bases.to(device), r_pos_enc.to(device),
-                q_indices.to(device), num_blocks.to(device))
-
-            logits = model(signals, bases, r_pos_enc, q_indices,
-                           num_blocks).cpu().numpy()  # N
-
-            for id, ctg, pos, logit in zip(ids, ctgs, poss, logits):
-                print(id, ctg, pos, logit, file=f, sep='\t')
-            pbar.update(len(logits))
-
-
-def get_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-
+def add_rf_inference_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('data_path', type=str)
     parser.add_argument('ckpt_path', type=str)
     parser.add_argument('-o', '--output', type=str, default='predictions.tsv')
     parser.add_argument('-d', '--gpus', default=None)
     parser.add_argument('-t', '--workers', type=int, default=0)
     parser.add_argument('-b', '--batch_size', type=int, default=1)
-    # parser.add_argument('-s', '--ref_len', type=int, default=31) Infer from the model
-    # parser.add_argument('--block_size', type=int, default=5)
-
-    return parser.parse_args()
-
-
-if __name__ == '__main__':
-    args = get_arguments()
-    # inference(args)
-    main(args)

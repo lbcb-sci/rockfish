@@ -8,6 +8,7 @@ from pathlib import Path
 from contextlib import ExitStack
 import sys
 import traceback
+import warnings
 import argparse
 
 from rockfish.extract.extract import Example
@@ -27,6 +28,21 @@ def parse_gpus(string: str) -> List[int]:
 
     gpus = string.strip().split(',')
     return [int(g) for g in gpus]
+
+
+def load_model(path: str, device: str, gpus: List[int]):
+    with warnings.catch_warnings():
+        model = Rockfish.load_from_checkpoint(path,
+                                              strict=False,
+                                              track_metrics=False)
+
+    block_size = model.block_size
+
+    if len(gpus) > 1:
+        model = DataParallel(model, gpus)
+    model = model.to(device)
+
+    return model, block_size
 
 
 class ExampleBins:
@@ -166,7 +182,7 @@ def worker_init_fn(worker_id: int) -> None:
     dataset.files = dataset.files[start:end]
 
 
-def main(args: argparse.Namespace) -> None:
+def inference(args: argparse.Namespace) -> None:
     files = list(get_files(args.input, args.recursive))
     random.shuffle(files)
 
@@ -179,20 +195,7 @@ def main(args: argparse.Namespace) -> None:
     gpus = parse_gpus(args.gpus) if args.gpus is not None else None
     device = 'cpu' if gpus is None else gpus[0]
 
-    model = Rockfish.load_from_checkpoint(
-        args.model_path,
-        track_metrics=False,
-        separate_unk_mask=not args.combined_mask)
-
-    block_size = model.block_size
-
-    if gpus is None:
-        model = model.to('cpu')
-    if len(gpus) == 1:
-        model = model.to(device)
-    else:
-        model = DataParallel(model, gpus)
-        model.to(device)
+    model, block_size = load_model(args.model_path, device, gpus)
     model.eval()
 
     dataset = Fast5Dataset(files, ref_positions, aligner, args.window,
@@ -229,15 +232,13 @@ def main(args: argparse.Namespace) -> None:
             pbar.update(n=len(positions))
 
 
-def get_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-
+def add_inference_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('-i', '--input', type=Path, required=True)
     parser.add_argument('-r', '--recursive', action='store_true')
 
     parser.add_argument('--model_path', type=str, required=True)
 
-    parser.add_argument('--reference', type=str)
+    parser.add_argument('--reference', type=str, required=True)
     parser.add_argument('--motif', type=str, default='CG')
     parser.add_argument('--idx', type=int, default=0)
 
@@ -248,13 +249,11 @@ def get_arguments() -> argparse.Namespace:
     parser.add_argument('-d', '--gpus', default=None)
     parser.add_argument('-t', '--workers', type=int, default=1)
     parser.add_argument('-b', '--batch_size', type=int, default=4096)
-    parser.add_argument('--combined_mask', action='store_true')
+    # parser.add_argument('--combined_mask', action='store_true')
 
     parser.add_argument('-o', '--output', type=str, default='predictions.tsv')
 
-    return parser.parse_args()
-
 
 if __name__ == '__main__':
-    args = get_arguments()
-    main(args)
+    args = add_inference_arguments(argparse.ArgumentParser())
+    inference(args)

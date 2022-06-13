@@ -117,9 +117,9 @@ def extract(args: argparse.Namespace) -> None:
     for w in workers:  # All workers should finish soon
         w.join()
 
-    merge(writers_path, args.dest, 2 * args.window + 1, True)
-    for p in writers_path:  # Removing tmp files
-        p.unlink()
+    merge(writers_path, args.dest, 2 * args.window + 1, args.delete_src)
+    #for p in writers_path:  # Removing tmp files
+    #    p.unlink()
 
 
 def add_extract_arguments(parser: argparse.ArgumentParser) -> None:
@@ -141,3 +141,5 @@ def add_extract_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--info_file', type=str, default='info.txt')
 
     parser.add_argument('--read_ids', type=Path, default=None)
+
+    parser.add_argument('--delete_src', action='store_true')
