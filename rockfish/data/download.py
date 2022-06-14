@@ -36,4 +36,4 @@ def download(args: argparse.Namespace) -> None:
 
 def add_download_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('-m', '--models', nargs='+', type=str, default='all')
-    parser.add_argument('-s', '--save_path', type=Optional[Path], default=None)
+    parser.add_argument('-s', '--save_path', type=Path, default=None)
