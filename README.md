@@ -4,7 +4,7 @@ Rockfish is the deep learning based tool for detecting 5mC DNA base modification
 
 ## Requirements
 
-* ONT Guppy (basecalling) 
+* ONT Guppy >= 5 (sup model)
 * Python >=3.9
 * CUDA (for GPU inference)
 
@@ -54,33 +54,18 @@ Rockfish is the deep learning based tool for detecting 5mC DNA base modification
      * 2 GPUs (3rd and 4th GPU): ```-d 2,3```
 
 ## Models
-| Model | Encoder layers | Decoder layers | Features | Feedforward | Download link |
-|-------|----------------|----------------|----------|-------------|---------------|
-| Base  | 12             | 12             | 256      | 1024        |               |
-| Small | 6              | 6              | 128      | 1024        |               |
+| Model | Encoder layers | Decoder layers | Features | Feedforward | Guppy config              |
+|-------|----------------|----------------|----------|-------------|---------------------------|
+| Base  | 12             | 12             | 256      | 1024        | dna_r9.4.1_450bps_sup.cfg |
+| Small | 6              | 6              | 128      | 1024        | dna_r9.4.1_450bps_sup.cfg |
 
 ## Example
-1. Download data available at Nanopolish [website](https://nanopolish.readthedocs.io/en/latest/quickstart_call_methylation.html):
+Run example script on Nanopolish [data](https://nanopolish.readthedocs.io/en/latest/quickstart_call_methylation.html):
 ```shell
-wget http://s3.climb.ac.uk/nanopolish_tutorial/methylation_example.tar.gz
-tar -xvf methylation_example.tar.gz
-cd methylation_example
+cd scripts
+GUPPY_PATH=<path_to_basecaller> ./example.sh
 ```
 
-2. Run guppy basecaller:
-```shell
-guppy_basecaller -i fast5_files/ -s basecalled -r --fast5_out -c dna_r9.4.1_450bps_sup.cfg -x "cuda:0"
-```
-
-3. Download T2T CHM13 Assembly (v2.0):
-```shell
-wget https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/analysis_set/chm13v2.0.fa.gz
-```
-
-4. Run inference
-```shell
-rockfish inference -i basecalled/workspace/ --model_path /raid-ssd/stanojevicd/dna-mod/final_training/small/small_final.ckpt -d 0 -t 32 --reference chm13v2.0.fa.gz
-```
 Result of the inference is ***predictions.tsv*** file. It is tab-delimited text file with four fileds:
   1. Read-id
   2. Contig name
