@@ -88,7 +88,8 @@ def extract(args: argparse.Namespace) -> None:
     aligner = get_aligner(args.reference, args.workers)
 
     tqdm.write('Building reference positions for the given motif.')
-    ref_positions = build_reference_idx2(aligner, args.motif, args.idx, args.workers)
+    ref_positions = build_reference_idx2(aligner, args.motif, args.idx,
+                                         args.workers)
 
     out_queue = mp.Queue()
 

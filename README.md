@@ -79,12 +79,12 @@ Evaluation on sample data:
 
 Read-level (n=258993) and correlation (n=64293) evaluation:
 
-| Tool              | Accuracy | Precision | Recall   | FPR      | F1-score | Pearson's r |
-|-------------------|----------|-----------|----------|----------|----------|-------------|
-| Nanopolish        | 0.851861 |  0.757576 | 0.839686 | 0.141718 | 0.796521 | 0.819401    |
-| Megalodon         | 0.885043 |  0.804421 | 0.881372 | 0.113021 |   0.8411 | 0.870277    |
-| Rockfish  (small) | 0.943265 |  0.900087 | 0.940043 | 0.055036 | 0.919631 | 0.893       |
+| Tool             | Accuracy | Precision | Recall   | FPR      | F1-score | Pearson's r |
+|------------------|----------|-----------|----------|----------|----------|-------------|
+| Nanopolish       | 0.851861 |  0.757576 | 0.839686 | 0.141718 | 0.796521 |    0.819401 |
+| Megalodon        | 0.885043 |  0.804421 | 0.881372 | 0.113021 | 0.8411   |    0.870277 |
+| Rockfish (small) | 0.943257 |  0.900076 | 0.940032 | 0.055042 | 0.9196   |    0.893018 |
 
 ## Acknowledgement
 
-This work has been supported in part by AI Singapore under the project the Deep Generative Modeling of Epigenomics Data (AISG-RPKS-2019-001), by Croatian Science Foundation under the project Single genome and metagenome assembly (IP-2018-01-5886), by National Supercomputing Centre, Singapore under the project Deep Generative Modelling of Epigenomics Data (13002174), by Epigenomics and Epitranscriptomics Research seed grant by Genome Institute of Singapore and by the A*STAR Computational Resource Centre through the use of its high-performance computing facilities.
+This work has been supported in part by AI Singapore under the project the Deep Generative Modeling of Epigenomics Data (AISG-RPKS-2019-001), by Croatian Science Foundation under the project Single genome and metagenome assembly (IP-2018-01-5886), by "Young Researchers" Career Development Program DOK-2018-09, by National Supercomputing Centre, Singapore under the project Deep Generative Modelling of Epigenomics Data (13002174), by Epigenomics and Epitranscriptomics Research seed grant by Genome Institute of Singapore and by the A*STAR Computational Resource Centre through the use of its high-performance computing facilities.
