@@ -12,7 +12,7 @@ Rockfish is the deep learning based tool for detecting 5mC DNA base modification
 
 0. Create new environment (e.g. Conda):
    ```shell
-   conda create --name rockfish
+   conda create --name rockfish python=3.9
    ```
 
 1. Clone the repository

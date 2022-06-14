@@ -6,7 +6,10 @@ import argparse
 
 from typing import *
 
-MODELS = {'base': '1CXWcnKrrv9jJ3XirzZDV3tzW4MZyYj73'}
+MODELS = {
+    'base': '1CXWcnKrrv9jJ3XirzZDV3tzW4MZyYj73',
+    'small': '1-MJrnzknj2TIKzKSrT_UNfSooERdGc6Q'
+}
 
 
 def download_model(model: str, save_path: Path) -> None:

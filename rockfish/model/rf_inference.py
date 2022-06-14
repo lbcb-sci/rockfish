@@ -1,13 +1,13 @@
 import torch
-from torch.nn import DataParallel
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 import os
 import multiprocessing as mp
-import argparse
 import fileinput
 from contextlib import ExitStack
+import warnings
+import argparse
 
 from .datasets import *
 from .model import Rockfish
@@ -29,9 +29,10 @@ def inference_worker(args: argparse.Namespace, gpu: Optional[int],
     device = torch.device(f'cuda:{gpu}') if gpu is not None else torch.device(
         'cpu')
 
-    model = Rockfish.load_from_checkpoint(args.ckpt_path,
-                                          strict=False,
-                                          track_metrics=False).to(device)
+    with warnings.catch_warnings():
+        model = Rockfish.load_from_checkpoint(args.ckpt_path,
+                                              strict=False,
+                                              track_metrics=False).to(device)
     model.eval()
 
     ref_len = model.hparams.bases_len
