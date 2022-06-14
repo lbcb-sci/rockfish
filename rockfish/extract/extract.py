@@ -1,6 +1,7 @@
 import numpy as np
 import mappy
 
+import multiprocessing as mp
 from dataclasses import dataclass
 import re
 
@@ -47,6 +48,36 @@ def build_reference_idx(aligner: mappy.Aligner, motif: str,
         positions[contig] = (fwd_pos, rev_pos)
 
     return positions
+
+
+def build_index_for_ctg(sequence: str, motif: str,
+                        rel_idx: str) -> Tuple[Set[int], Set[int]]:
+    fwd_pos = {m.start() + rel_idx for m in re.finditer(motif, sequence, re.I)}
+
+    rev_comp = mappy.revcomp(sequence)
+    seq_len = len(rev_comp)
+
+    def pos_for_rev(i: int) -> int:
+        return seq_len - (i + rel_idx) - 1
+
+    rev_pos = {
+        pos_for_rev(m.start()) for m in re.finditer(motif, rev_comp, re.I)
+    }
+
+    return fwd_pos, rev_pos
+
+
+def build_reference_idx2(aligner: mappy.Aligner, motif: str, rel_idx: int,
+                         n_workers: int) -> MotifPositions:
+    ctgs = [ctg for ctg in aligner.seq_names]
+
+    def idx_func(seq: str) -> Tuple[Set[int], Set[int]]:
+        return build_index_for_ctg(seq, motif, rel_idx)
+
+    with mp.Pool(n_workers) as pool:
+        positions = pool.imap(idx_func, (aligner.seq(ctg) for ctg in ctgs))
+
+    return {c: p for c, p in zip(ctgs, positions)}
 
 
 def get_ref_pos(aln_data: AlignmentData, ref_positions: MotifPositions,

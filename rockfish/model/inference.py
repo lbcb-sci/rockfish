@@ -11,7 +11,7 @@ import traceback
 import warnings
 import argparse
 
-from rockfish.extract.extract import Example
+from rockfish.extract.extract import Example, build_reference_idx2
 from rockfish.extract.main import *
 from rockfish.model.model import Rockfish
 from rockfish.model.datasets import *
@@ -190,7 +190,8 @@ def inference(args: argparse.Namespace) -> None:
     aligner = get_aligner(args.reference)
 
     tqdm.write('Building reference positions for the given motif.')
-    ref_positions = build_reference_idx(aligner, args.motif, args.idx)
+    ref_positions = build_reference_idx2(aligner, args.motif, args.idx,
+                                         args.workers)
 
     gpus = parse_gpus(args.gpus) if args.gpus is not None else None
     device = 'cpu' if gpus is None else gpus[0]
