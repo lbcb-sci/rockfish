@@ -13,7 +13,7 @@ from typing import *
 from rockfish.rftools.merge import merge
 from .fast5 import load_read
 from .alignment import get_aligner, AlignmentInfo
-from .extract import extract_features, MotifPositions, build_reference_idx
+from .extract import extract_features, MotifPositions, build_reference_idx2
 from .writer import BinaryWriter
 
 import traceback
@@ -85,10 +85,10 @@ def extract(args: argparse.Namespace) -> None:
         in_queue.put(None)
 
     tqdm.write(f'Parsing reference file {args.reference}')
-    aligner = get_aligner(args.reference)
+    aligner = get_aligner(args.reference, args.workers)
 
     tqdm.write('Building reference positions for the given motif.')
-    ref_positions = build_reference_idx(aligner, args.motif, args.idx)
+    ref_positions = build_reference_idx2(aligner, args.motif, args.idx, args.workers)
 
     out_queue = mp.Queue()
 

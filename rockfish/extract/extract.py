@@ -3,6 +3,7 @@ import mappy
 
 import multiprocessing as mp
 from dataclasses import dataclass
+from functools import partial
 import re
 
 from typing import *
@@ -71,11 +72,10 @@ def build_reference_idx2(aligner: mappy.Aligner, motif: str, rel_idx: int,
                          n_workers: int) -> MotifPositions:
     ctgs = [ctg for ctg in aligner.seq_names]
 
-    def idx_func(seq: str) -> Tuple[Set[int], Set[int]]:
-        return build_index_for_ctg(seq, motif, rel_idx)
-
+    n_workers = min(n_workers, len(ctgs))
     with mp.Pool(n_workers) as pool:
-        positions = pool.imap(idx_func, (aligner.seq(ctg) for ctg in ctgs))
+        idx_func = partial(build_index_for_ctg, motif=motif, rel_idx=rel_idx)
+        positions = pool.map(idx_func, (aligner.seq(ctg) for ctg in ctgs))
 
     return {c: p for c, p in zip(ctgs, positions)}
 

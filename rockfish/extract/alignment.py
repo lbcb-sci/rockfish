@@ -72,5 +72,6 @@ def align_read(query: str, aligner: mappy.Aligner, buffer: mappy.ThreadBuffer,
     return AlignmentInfo.SUCCESS, data
 
 
-def get_aligner(reference_path: Path) -> mappy.Aligner:
-    return mappy.Aligner(str(reference_path), preset='map-ont', best_n=1)
+def get_aligner(reference_path: Path, n_threads: int) -> mappy.Aligner:
+    n_threads = max(1, n_threads - 1)
+    return mappy.Aligner(str(reference_path), preset='map-ont', best_n=1, n_threads=n_threads)

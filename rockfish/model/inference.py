@@ -187,7 +187,7 @@ def inference(args: argparse.Namespace) -> None:
     random.shuffle(files)
 
     tqdm.write(f'Parsing reference file {args.reference}')
-    aligner = get_aligner(args.reference)
+    aligner = get_aligner(args.reference, args.workers)
 
     tqdm.write('Building reference positions for the given motif.')
     ref_positions = build_reference_idx2(aligner, args.motif, args.idx,
