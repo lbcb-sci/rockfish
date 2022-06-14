@@ -10,7 +10,7 @@ $GUPPY_PATH -i fast5_files/ -s basecalled -r --fast5_out -c dna_r9.4.1_450bps_su
 wget https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/analysis_set/chm13v2.0.fa.gz
 
 # Download small model
-rockfish download -m base -s .
+rockfish download -m small -s .
 
 # Run inference
-rockfish inference -i basecalled/workspace/ --model_path rf_base.ckpt -d 0 -t 32 --reference chm13v2.0.fa.gz
+rockfish inference -i basecalled/workspace/ --model_path rf_base.ckpt -d 0 -t 8 --reference chm13v2.0.fa.gz
