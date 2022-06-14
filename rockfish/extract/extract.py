@@ -35,9 +35,10 @@ def build_reference_idx(aligner: mappy.Aligner, motif: str,
         }
 
         rev_comp = mappy.revcomp(sequence)
+        seq_len = len(rev_comp)
 
         def pos_for_rev(i: int) -> int:
-            return len(sequence) - (i + rel_idx) - 1
+            return seq_len - (i + rel_idx) - 1
 
         rev_pos = {
             pos_for_rev(m.start()) for m in re.finditer(motif, rev_comp, re.I)

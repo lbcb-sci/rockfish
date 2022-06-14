@@ -13,4 +13,4 @@ wget https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/a
 rockfish download -m small -s .
 
 # Run inference
-rockfish inference -i basecalled/workspace/ --model_path rf_base.ckpt -d 0 -t 8 --reference chm13v2.0.fa.gz
+rockfish inference -i basecalled/workspace/ --model_path rf_small.ckpt -d 0 -t 8 --reference chm13v2.0.fa.gz
