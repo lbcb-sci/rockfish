@@ -203,5 +203,6 @@ $RECYCLE.BIN/
 /data/
 rockfish/data/**
 !rockfish/data/download.py
+!rockfish/data/__init__.py
 
 # End of https://www.toptal.com/developers/gitignore/api/linux,visualstudiocode,python,windows
