@@ -1,13 +1,15 @@
 import numpy as np
 import mappy
 
+import multiprocessing as mp
 from dataclasses import dataclass
+from functools import partial
 import re
 
 from typing import *
 
 from .fast5 import ReadInfo
-from .alignment import AlignmentData, align_read
+from .alignment import AlignmentData, AlignmentInfo, align_read
 
 MotifPositions = Dict[str, Tuple[Set[int], Set[int]]]
 
@@ -31,23 +33,51 @@ def build_reference_idx(aligner: mappy.Aligner, motif: str,
         sequence = aligner.seq(contig)
 
         fwd_pos = {
-            m.start() + rel_idx
-            for m in re.finditer(motif, sequence, re.I)
+            m.start() + rel_idx for m in re.finditer(motif, sequence, re.I)
         }
 
         rev_comp = mappy.revcomp(sequence)
+        seq_len = len(rev_comp)
 
         def pos_for_rev(i: int) -> int:
-            return len(sequence) - (i + rel_idx) - 1
+            return seq_len - (i + rel_idx) - 1
 
         rev_pos = {
-            pos_for_rev(m.start())
-            for m in re.finditer(motif, rev_comp, re.I)
+            pos_for_rev(m.start()) for m in re.finditer(motif, rev_comp, re.I)
         }
 
         positions[contig] = (fwd_pos, rev_pos)
 
     return positions
+
+
+def build_index_for_ctg(sequence: str, motif: str,
+                        rel_idx: str) -> Tuple[Set[int], Set[int]]:
+    fwd_pos = {m.start() + rel_idx for m in re.finditer(motif, sequence, re.I)}
+
+    rev_comp = mappy.revcomp(sequence)
+    seq_len = len(rev_comp)
+
+    def pos_for_rev(i: int) -> int:
+        return seq_len - (i + rel_idx) - 1
+
+    rev_pos = {
+        pos_for_rev(m.start()) for m in re.finditer(motif, rev_comp, re.I)
+    }
+
+    return fwd_pos, rev_pos
+
+
+def build_reference_idx2(aligner: mappy.Aligner, motif: str, rel_idx: int,
+                         n_workers: int) -> MotifPositions:
+    ctgs = [ctg for ctg in aligner.seq_names]
+
+    n_workers = min(n_workers, len(ctgs))
+    with mp.Pool(n_workers) as pool:
+        idx_func = partial(build_index_for_ctg, motif=motif, rel_idx=rel_idx)
+        positions = pool.map(idx_func, (aligner.seq(ctg) for ctg in ctgs))
+
+    return {c: p for c, p in zip(ctgs, positions)}
 
 
 def get_ref_pos(aln_data: AlignmentData, ref_positions: MotifPositions,
@@ -76,16 +106,17 @@ def get_event_length(position: int, ref_to_query: np.ndarray,
 
 
 def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
-                     aligner: mappy.Aligner, window: int, mapq_filter: int,
-                     unique_aln: bool) -> List[Example]:
+                     aligner: mappy.Aligner, buffer: mappy.ThreadBuffer,
+                     window: int, mapq_filter: int,
+                     unique_aln: bool) -> Tuple[AlignmentInfo, List[Example]]:
     seq_to_sig = read_info.get_seq_to_sig()
     signal = read_info.get_normalized_signal(end=seq_to_sig[-1]) \
                         .astype(np.half)
     query, _ = read_info.get_seq_and_quals()
     example_bases = (2 * window) + 1
 
-    status, aln_data = align_read(query, aligner, mapq_filter, unique_aln,
-                                  read_info.read_id)
+    status, aln_data = align_read(query, aligner, buffer, mapq_filter,
+                                  unique_aln, read_info.read_id)
     if aln_data is None:
         return status, None
 

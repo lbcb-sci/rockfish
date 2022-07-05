@@ -1,14 +1,50 @@
-from torch.utils.data import IterableDataset
+import torch
+from torch.nn import DataParallel
+from torch.utils.data import IterableDataset, DataLoader
 import mappy
 
+import random
 from pathlib import Path
+from contextlib import ExitStack
 import sys
 import traceback
+import warnings
+import argparse
 
-from rockfish.extract.extract import Example
+from rockfish.extract.extract import Example, build_reference_idx2
 from rockfish.extract.main import *
+from rockfish.model.model import Rockfish
+from rockfish.model.datasets import *
 
 from typing import *
+
+MIN_BLOCKS_LEN_FACTOR = 1
+MAX_BLOCKS_LEN_FACTOR = 4
+
+HEADER = '\t'.join(['read_id', 'ctg', 'pos', 'prob'])
+
+
+def parse_gpus(string: str) -> List[int]:
+    if string is None:
+        return None
+
+    gpus = string.strip().split(',')
+    return [int(g) for g in gpus]
+
+
+def load_model(path: str, device: str, gpus: List[int]):
+    with warnings.catch_warnings():
+        model = Rockfish.load_from_checkpoint(path,
+                                              strict=False,
+                                              track_metrics=False)
+
+    block_size = model.block_size
+
+    if len(gpus) > 1:
+        model = DataParallel(model, gpus)
+    model = model.to(device)
+
+    return model, block_size
 
 
 class ExampleBins:
@@ -39,7 +75,7 @@ class ExampleBins:
             self.bins[n_bin] = []
             self.count -= len(bin)
 
-            return self.bins
+            return bin
 
         if self.count >= self.max_examples:
             return self.emit_batch()
@@ -47,7 +83,7 @@ class ExampleBins:
     def emit_batch(self) -> Iterator[Example]:
         batch_processed = 0
 
-        for bin in self.bins:
+        for bin in reversed(self.bins):
             while len(bin) > 0 and batch_processed < self.batch_size:
                 example = bin.pop()
 
@@ -56,12 +92,17 @@ class ExampleBins:
 
                 yield example
 
+    def emit_all(self) -> Iterator[Example]:
+        for bin in self.bins:
+            for example in bin:
+                yield example
+
 
 class Fast5Dataset(IterableDataset):
 
     def __init__(self, files: List[Path], ref_positions: MotifPositions,
                  aligner: mappy.Aligner, window: int, mapq_filter: int,
-                 unique_aln: bool) -> None:
+                 unique_aln: bool, batch_size: int, block_size: int) -> None:
         super().__init__()
 
         self.files = files
@@ -70,9 +111,16 @@ class Fast5Dataset(IterableDataset):
         self.window = window
         self.mapq_filter = mapq_filter
         self.unique_aln = unique_aln
+        self.block_size = block_size
+        self.bases_len = (2 * window) + 1
+        self.batch_size = batch_size
+
+        self.mapping_encodings = ReferenceMapping(self.bases_len, block_size)
 
     def __iter__(self):
-        self.bins = ExampleBins()
+        bins = ExampleBins(self.bases_len * MIN_BLOCKS_LEN_FACTOR,
+                           self.bases_len * MAX_BLOCKS_LEN_FACTOR,
+                           self.batch_size)
 
         buffer = mappy.ThreadBuffer()
         for file in self.files:
@@ -82,11 +130,10 @@ class Fast5Dataset(IterableDataset):
                 except Exception as e:
                     print(f'Cannot load read from file {file}.',
                           file=sys.stderr)
-                    traceback.print_exc()
-                    sys.exit(-1)
+                    # traceback.print_exc()
+                    continue
 
                 try:
-                    read_info = load_read(read)
                     _, examples = extract_features(
                         read_info, self.ref_positions, self.aligner, buffer,
                         self.window, self.mapq_filter, self.unique_aln)
@@ -94,5 +141,123 @@ class Fast5Dataset(IterableDataset):
                     print(
                         f'Cannot process read {read_info.read_id} from file {file}.',
                         file=sys.stderr)
-                    traceback.print_exc()
-                    sys.exit(-1)
+                    # traceback.print_exc()
+                    continue
+
+                if examples is None:
+                    continue
+
+                for example in examples:
+                    batch = bins.add_example(example)
+                    if batch is not None:
+                        yield from (self.example_to_tensor(e) for e in batch)
+
+        for example in bins.emit_all():
+            yield self.example_to_tensor(example)
+
+    def example_to_tensor(
+        self, example: Example
+    ) -> Tuple[str, str, int, torch.Tensor, torch.Tensor, torch.Tensor,
+               torch.Tensor]:
+        signal = torch.tensor(example.signal,
+                              dtype=torch.half).unfold(-1, self.block_size,
+                                                       self.block_size)
+        bases = torch.tensor([ENCODING.get(b, 4) for b in example.bases])
+        q_indices = torch.tensor(example.q_indices.astype(np.int32))
+        lengths = torch.tensor(np.array(example.event_length).astype(np.int32))
+
+        r_pos_enc = self.mapping_encodings(lengths)
+
+        return example.read_id, example.ctg, example.pos, signal, bases, r_pos_enc, q_indices
+
+
+def worker_init_fn(worker_id: int) -> None:
+    worker_info = torch.utils.data.get_worker_info()
+    dataset = worker_info.dataset
+
+    total_files = len(dataset.files)
+    per_worker = int(math.ceil(total_files / float(worker_info.num_workers)))
+
+    start = worker_id * per_worker
+    end = min(start + per_worker, total_files)
+    dataset.files = dataset.files[start:end]
+
+
+def inference(args: argparse.Namespace) -> None:
+    files = list(get_files(args.input, args.recursive))
+    random.shuffle(files)
+
+    tqdm.write(f'Parsing reference file {args.reference}')
+    aligner = get_aligner(args.reference, args.workers)
+
+    tqdm.write('Building reference positions for the given motif.')
+    ref_positions = build_reference_idx2(aligner, args.motif, args.idx,
+                                         args.workers)
+
+    gpus = parse_gpus(args.gpus) if args.gpus is not None else None
+    device = 'cpu' if gpus is None else gpus[0]
+
+    model, block_size = load_model(args.model_path, device, gpus)
+    model.eval()
+
+    dataset = Fast5Dataset(files, ref_positions, aligner, args.window,
+                           args.mapq_filter, args.unique_aln, args.batch_size,
+                           block_size)
+    loader = DataLoader(dataset,
+                        batch_size=args.batch_size,
+                        num_workers=args.workers,
+                        collate_fn=collate_fn_inference,
+                        worker_init_fn=worker_init_fn,
+                        pin_memory=True)
+
+    with ExitStack() as manager:
+        output_file = manager.enter_context(open(args.output, 'w'))
+        output_file.write(f'{HEADER}\n')
+
+        manager.enter_context(torch.no_grad())
+        pbar = manager.enter_context(tqdm())
+
+        if gpus is not None:
+            manager.enter_context(torch.cuda.amp.autocast())
+
+        for ids, ctgs, positions, signals, bases, r_mappings, q_mappings, n_blocks in loader:
+            signals = signals.to(device)
+            bases = bases.to(device)
+            r_mappings = r_mappings.to(device)
+            q_mappings = q_mappings.to(device)
+            n_blocks = n_blocks.to(device)
+
+            probs = model(signals, r_mappings, q_mappings, bases,
+                          n_blocks).sigmoid().cpu().numpy()
+
+            for id, ctg, pos, prob in zip(ids, ctgs, positions, probs):
+                print(id, ctg, pos, prob, file=output_file, sep='\t')
+
+            pbar.update(n=len(positions))
+
+
+def add_inference_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument('-i', '--input', type=Path, required=True)
+    parser.add_argument('-r', '--recursive', action='store_true')
+
+    parser.add_argument('--model_path', type=str, required=True)
+
+    parser.add_argument('--reference', type=str, required=True)
+    parser.add_argument('--motif', type=str, default='CG')
+    parser.add_argument('--idx', type=int, default=0)
+
+    parser.add_argument('-w', '--window', type=int, default=15)
+    parser.add_argument('-q', '--mapq_filter', type=int, default=0)
+    parser.add_argument('-u', '--unique_aln', action='store_true')
+
+    parser.add_argument('-d', '--gpus', default=None)
+    parser.add_argument('-t', '--workers', type=int, default=1)
+    parser.add_argument('-b', '--batch_size', type=int, default=4096)
+    # parser.add_argument('--combined_mask', action='store_true')
+
+    parser.add_argument('-o', '--output', type=str, default='predictions.tsv')
+
+
+if __name__ == '__main__':
+    args = add_inference_arguments(argparse.ArgumentParser())
+    inference(args)

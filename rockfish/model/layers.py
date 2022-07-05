@@ -3,6 +3,7 @@ import torch
 from torch.functional import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.init import xavier_uniform_
 from torch.nn.utils.rnn import pad_sequence
 
 import math
@@ -11,6 +12,7 @@ from typing import *
 
 
 class PositionalEncoding(nn.Module):
+
     def __init__(self, d_model, dropout=0.1, max_len=31):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
@@ -30,6 +32,7 @@ class PositionalEncoding(nn.Module):
 
 
 class RockfishEncoder(nn.Module):
+
     def __init__(self, embed_dim: int, nhead: int, dim_ff: int, n_layers: int,
                  dropout: float) -> None:
         super().__init__()
@@ -48,6 +51,7 @@ class RockfishEncoder(nn.Module):
 
 
 class RockfishLayer(nn.Module):
+
     def __init__(self,
                  embed_dim: int,
                  nhead: int,
@@ -90,6 +94,7 @@ class RockfishLayer(nn.Module):
 
 
 class LinearProjection(nn.Module):
+
     def __init__(self,
                  embed_dim: int,
                  dim_ff: int,
@@ -106,6 +111,7 @@ class LinearProjection(nn.Module):
 
 
 class SignalPositionalEncoding(nn.Module):
+
     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 124):
         super(SignalPositionalEncoding, self).__init__()
 
@@ -125,7 +131,7 @@ class SignalPositionalEncoding(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, r_pos_enc, q_pos_enc, signal_mask=None):
+    def forward2(self, x, r_pos_enc, q_pos_enc, signal_mask=None):
         B, S, _ = x.size()
 
         if signal_mask is not None:
@@ -144,8 +150,24 @@ class SignalPositionalEncoding(nn.Module):
 
         return self.dropout(x)
 
+    def forward(self, x, r_pos_enc, q_pos_enc, signal_mask=None):
+        B, S, _ = x.size()
+
+        if signal_mask is not None:
+            r_pos_enc = r_pos_enc * ~signal_mask
+            q_pos_enc = q_pos_enc * ~signal_mask
+
+        x[:, :, 0::4] += self.pe_cos[:S]
+        x[:, :, 1::4] += self.pe_sin[:S]
+
+        x[:, :, 2::4] += torch.cos(r_pos_enc.unsqueeze(-1) * self.div_term)
+        x[:, :, 3::4] += torch.cos(q_pos_enc.unsqueeze(-1) * self.div_term)
+
+        return self.dropout(x)
+
 
 class SignalLayer(nn.Module):
+
     def __init__(
         self,
         embed_dim: int,
@@ -186,6 +208,7 @@ class SignalLayer(nn.Module):
 
 
 class AlignmentLayer(nn.Module):
+
     def __init__(
         self,
         embed_dim: int,
@@ -242,6 +265,7 @@ class AlignmentLayer(nn.Module):
 
 
 class AlignmentDecoder(nn.Module):
+
     def __init__(self,
                  embed_dim: int,
                  num_heads: int,
@@ -264,8 +288,16 @@ class AlignmentDecoder(nn.Module):
 
         return bases
 
+    def _reset_parameters(self):
+        r"""Initiate parameters in the transformer model."""
+
+        for p in self.parameters():
+            if p.dim() > 1:
+                xavier_uniform_(p)
+
 
 class SignalEncoder(nn.Module):
+
     def __init__(self,
                  embed_dim: int,
                  num_heads: int,
@@ -284,3 +316,10 @@ class SignalEncoder(nn.Module):
             signal = layer(signal, signal_mask)
 
         return signal
+
+    def _reset_parameters(self):
+        r"""Initiate parameters in the transformer model."""
+
+        for p in self.parameters():
+            if p.dim() > 1:
+                xavier_uniform_(p)
