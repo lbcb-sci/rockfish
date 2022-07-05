@@ -192,7 +192,7 @@ def collate_fn_train(batch):
     q_pos_enc = pad_sequence(q_pos_enc, batch_first=True)  # [B, MAX_LEN]
 
     return signals, ref_mapping, q_pos_enc, torch.stack(
-        bases, 0), num_blocks, torch.tensor(labels), singleton
+        bases, 0), num_blocks, torch.tensor(labels), torch.tensor(singleton)
 
 
 def collate_fn_inference(batch):

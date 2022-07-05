@@ -21,6 +21,8 @@ from typing import *
 MIN_BLOCKS_LEN_FACTOR = 1
 MAX_BLOCKS_LEN_FACTOR = 4
 
+HEADER = '\t'.join(['read_id', 'ctg', 'pos', 'prob'])
+
 
 def parse_gpus(string: str) -> List[int]:
     if string is None:
@@ -128,11 +130,10 @@ class Fast5Dataset(IterableDataset):
                 except Exception as e:
                     print(f'Cannot load read from file {file}.',
                           file=sys.stderr)
-                    traceback.print_exc()
-                    sys.exit(-1)
+                    # traceback.print_exc()
+                    continue
 
                 try:
-                    read_info = load_read(read)
                     _, examples = extract_features(
                         read_info, self.ref_positions, self.aligner, buffer,
                         self.window, self.mapq_filter, self.unique_aln)
@@ -140,8 +141,8 @@ class Fast5Dataset(IterableDataset):
                     print(
                         f'Cannot process read {read_info.read_id} from file {file}.',
                         file=sys.stderr)
-                    traceback.print_exc()
-                    sys.exit(-1)
+                    # traceback.print_exc()
+                    continue
 
                 if examples is None:
                     continue
@@ -211,6 +212,8 @@ def inference(args: argparse.Namespace) -> None:
 
     with ExitStack() as manager:
         output_file = manager.enter_context(open(args.output, 'w'))
+        output_file.write(f'{HEADER}\n')
+
         manager.enter_context(torch.no_grad())
         pbar = manager.enter_context(tqdm())
 
@@ -224,11 +227,11 @@ def inference(args: argparse.Namespace) -> None:
             q_mappings = q_mappings.to(device)
             n_blocks = n_blocks.to(device)
 
-            logits = model(signals, r_mappings, q_mappings, bases,
-                           n_blocks).cpu().numpy()
+            probs = model(signals, r_mappings, q_mappings, bases,
+                          n_blocks).sigmoid().cpu().numpy()
 
-            for id, ctg, pos, logit in zip(ids, ctgs, positions, logits):
-                print(id, ctg, pos, logit, file=output_file, sep='\t')
+            for id, ctg, pos, prob in zip(ids, ctgs, positions, probs):
+                print(id, ctg, pos, prob, file=output_file, sep='\t')
 
             pbar.update(n=len(positions))
 
