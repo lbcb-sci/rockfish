@@ -2,6 +2,7 @@ import torch
 from torch.nn import DataParallel
 from torch.utils.data import IterableDataset, DataLoader
 import mappy
+import multiprocessing_logging as mp_logging
 
 import random
 from pathlib import Path
@@ -9,6 +10,7 @@ from contextlib import ExitStack
 import sys
 import traceback
 import warnings
+import logging
 import argparse
 
 from rockfish.extract.extract import Example, build_reference_idx2
@@ -122,15 +124,17 @@ class Fast5Dataset(IterableDataset):
                            self.bases_len * MAX_BLOCKS_LEN_FACTOR,
                            self.batch_size)
 
-        buffer = mappy.ThreadBuffer()
+        # buffer = mappy.ThreadBuffer()
+        buffer = None
         for file in self.files:
             for read in get_reads(file):
                 try:
                     read_info = load_read(read)
                 except Exception as e:
-                    print(f'Cannot load read from file {file}.',
-                          file=sys.stderr)
                     # traceback.print_exc()
+                    logging.exception(
+                        f'Cannot load read {read.read_id} data from file {file}.',
+                        exc_info=True)
                     continue
 
                 try:
@@ -138,9 +142,9 @@ class Fast5Dataset(IterableDataset):
                         read_info, self.ref_positions, self.aligner, buffer,
                         self.window, self.mapq_filter, self.unique_aln)
                 except Exception as e:
-                    print(
+                    logging.exception(
                         f'Cannot process read {read_info.read_id} from file {file}.',
-                        file=sys.stderr)
+                        exc_info=True)
                     # traceback.print_exc()
                     continue
 
@@ -184,8 +188,12 @@ def worker_init_fn(worker_id: int) -> None:
 
 
 def inference(args: argparse.Namespace) -> None:
+    logging.basicConfig(filename=args.log)
+    mp_logging.install_mp_handler()
+
     files = list(get_files(args.input, args.recursive))
     random.shuffle(files)
+    logging.info(f'Found {len(files)} FAST5 files.')
 
     tqdm.write(f'Parsing reference file {args.reference}')
     aligner = get_aligner(args.reference, args.workers)
@@ -235,6 +243,8 @@ def inference(args: argparse.Namespace) -> None:
 
             pbar.update(n=len(positions))
 
+        logging.info(f'Processed {pbar.n} examples.')
+
 
 def add_inference_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('-i', '--input', type=Path, required=True)
@@ -256,6 +266,7 @@ def add_inference_arguments(parser: argparse.ArgumentParser) -> None:
     # parser.add_argument('--combined_mask', action='store_true')
 
     parser.add_argument('-o', '--output', type=str, default='predictions.tsv')
+    parser.add_argument('-l', '--log', type=str, default=None)
 
 
 if __name__ == '__main__':

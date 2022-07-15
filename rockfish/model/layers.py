@@ -122,33 +122,23 @@ class SignalPositionalEncoding(nn.Module):
         pe_cos = torch.sin(position * div_term)
         pe_sin = torch.cos(position * div_term)
 
-        self.register_parameter('div_term',
-                                nn.Parameter(div_term, requires_grad=False))
-        self.register_parameter('pe_cos',
-                                nn.Parameter(pe_cos, requires_grad=False))
-        self.register_parameter('pe_sin',
-                                nn.Parameter(pe_sin, requires_grad=False))
+        self.register_buffer('div_term', div_term, False)
+        self.register_buffer('pe_cos', pe_cos, False)
+        self.register_buffer('pe_sin', pe_sin, False)
+
+        #self.register_parameter('div_term',
+        #                        nn.Parameter(div_term, requires_grad=False))
+        #self.register_parameter('pe_cos', None)
+        #nn.Parameter(pe_cos, requires_grad=False))
+        #self.register_parameter('pe_sin', None)
+        # nn.Parameter(pe_sin, requires_grad=False))
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward2(self, x, r_pos_enc, q_pos_enc, signal_mask=None):
-        B, S, _ = x.size()
-
-        if signal_mask is not None:
-            signal_mask = pad_sequence(signal_mask,
-                                       batch_first=True,
-                                       padding_value=True)
-
-            r_pos_enc = r_pos_enc * ~signal_mask
-            q_pos_enc = q_pos_enc * ~signal_mask
-
-        x[:, :, 0::4] += self.pe_cos[:S]
-        x[:, :, 1::4] += self.pe_sin[:S]
-
-        x[:, :, 2::4] += r_pos_enc.unsqueeze(-1) * self.div_term
-        x[:, :, 3::4] += q_pos_enc.unsqueeze(-1) * self.div_term
-
-        return self.dropout(x)
+        self.slice1 = list(range(0, d_model, 4))
+        self.slice2 = list(range(1, d_model, 4))
+        self.slice3 = list(range(2, d_model, 4))
+        self.slice4 = list(range(3, d_model, 4))
 
     def forward(self, x, r_pos_enc, q_pos_enc, signal_mask=None):
         B, S, _ = x.size()
@@ -157,11 +147,13 @@ class SignalPositionalEncoding(nn.Module):
             r_pos_enc = r_pos_enc * ~signal_mask
             q_pos_enc = q_pos_enc * ~signal_mask
 
-        x[:, :, 0::4] += self.pe_cos[:S]
-        x[:, :, 1::4] += self.pe_sin[:S]
+        x[:, :, self.slice1] += self.pe_cos[:S]
+        x[:, :, self.slice2] += self.pe_sin[:S]
 
-        x[:, :, 2::4] += torch.cos(r_pos_enc.unsqueeze(-1) * self.div_term)
-        x[:, :, 3::4] += torch.cos(q_pos_enc.unsqueeze(-1) * self.div_term)
+        x[:, :,
+          self.slice3] += torch.cos(r_pos_enc.unsqueeze(-1) * self.div_term)
+        x[:, :,
+          self.slice4] += torch.cos(q_pos_enc.unsqueeze(-1) * self.div_term)
 
         return self.dropout(x)
 
