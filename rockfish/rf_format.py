@@ -64,8 +64,8 @@ class RFExampleHeader:
         return cls(read_id.decode(), ctg_id, pos, n_points, q_indices_len)
 
     def to_bytes(self) -> bytes:
-        return EXAMPLE_HEADER_STRUCT.pack(str.encode(self.read_id),
-                                          self.ctg_id, self.pos, self.n_points,
+        return EXAMPLE_HEADER_STRUCT.pack(str.encode(self.read_id), self.ctg_id,
+                                          self.pos, self.n_points,
                                           self.q_indices_len)
 
     def example_len(self, seq_len: int) -> int:
@@ -131,17 +131,23 @@ class RFExample:
     data: RFExampleData
 
     @classmethod
-    def from_file(cls, fd: BufferedReader, seq_len: int, offset: Optional[int] = None) -> RFExample:
+    def from_file(cls,
+                  fd: BufferedReader,
+                  seq_len: int,
+                  offset: Optional[int] = None) -> RFExample:
         if offset is not None:
             fd.seek(offset)
 
-        header = RFExampleHeader.parse_bytes(fd.read(EXAMPLE_HEADER_STRUCT.size))
-        data = RFExampleData.parse_bytes(fd.read(header.example_len(seq_len)), header, seq_len)
+        header = RFExampleHeader.parse_bytes(fd.read(
+            EXAMPLE_HEADER_STRUCT.size))
+        data = RFExampleData.parse_bytes(fd.read(header.example_len(seq_len)),
+                                         header, seq_len)
 
         return cls(header, data)
 
 
 class DictLabels:
+
     def __init__(self, path: str) -> None:
         self.label_for_read = {}
         self.label_for_pos = {}
@@ -163,9 +169,13 @@ class DictLabels:
                     raise ValueError(f'Wrong label line {i}.')
 
     def get_label(self, read_id, ctg, pos):
+        label = self.label_for_read_pos.get((read_id, ctg, pos))
+        if label is not None:
+            return label
+
         if read_id in self.label_for_read:
             return self.label_for_read[read_id]
         elif (ctg, pos) in self.label_for_pos:
             return self.label_for_pos[(ctg, pos)]
-
-        return self.label_for_read_pos[(read_id, ctg, pos)]
+        else:
+            raise ValueError(f'No label for ({read_id}, {ctg}. {pos})')
