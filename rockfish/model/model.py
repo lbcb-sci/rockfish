@@ -131,7 +131,7 @@ class Rockfish(pl.LightningModule):
 
         x = self.bases_norm(bases[:, self.central_base])
 
-        return self.fc_mod(x).squeeze(-1), self.fc_mask(x)  # BxE -> B
+        return self.fc_mod(x).squeeze(-1)  # BxE -> B
 
     def forward_train(self,
                       signal,
@@ -227,9 +227,6 @@ class Rockfish(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, singleton = batch
-        #loss_weights = torch.tensor(
-        #    [self.hparams.singleton_weight if s else 1. for s in singleton],
-        #    device=self.device)
 
         bases_mask = None
         if self.bases_mask_task:
@@ -243,11 +240,8 @@ class Rockfish(pl.LightningModule):
             num_blocks,
             bases_mask=bases_mask)
 
-        mod_loss = F.binary_cross_entropy_with_logits(
-            mod_logits,
-            labels.float(),
-        )
-        #weight=loss_weights)
+        mod_loss = F.binary_cross_entropy_with_logits(mod_logits,
+                                                      labels.float())
 
         loss = mod_loss
         self.log('train_mod_loss', mod_loss)
@@ -275,9 +269,6 @@ class Rockfish(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, singleton = batch
-        #loss_weights = torch.tensor(
-        #    [self.hparams.singleton_weight if s else 1. for s in singleton],
-        #    device=self.device)
 
         logits = self(signals, r_pos_enc, q_pos_enc, bases, num_blocks)
 
@@ -285,21 +276,24 @@ class Rockfish(pl.LightningModule):
             logits,
             labels.float(),
         )
-        #weight=loss_weights)
-
         self.log('val_loss', loss, prog_bar=True)
 
         targets = (labels > 0.5).int()
-        self.log('val_acc', self.val_acc(logits, targets), prog_bar=True)
-        self.log('val_ap', self.val_ap(logits, labels))
 
-        self.log('non_singleton_acc',
-                 self.ns_acc(logits[~singleton], targets[~singleton]))
+        self.val_acc(logits, targets)
+        self.log('val_acc', self.val_acc, prog_bar=True)
 
-        self.log('singleton_acc',
-                 self.val_acc(logits[singleton], targets[singleton]))
+        self.val_ap(logits, targets)
+        self.log('val_ap', self.val_ap)
 
-        self.log('f1-score', self.f1(logits, targets))
+        self.ns_acc(logits[~singleton], targets[~singleton])
+        self.log('non_singleton_acc', self.ns_acc)
+
+        self.s_acc(logits[singleton], targets[singleton])
+        self.log('singleton_acc', self.s_acc)
+
+        self.f1(logits, targets)
+        self.log('f1-score', self.f1)
 
 
 def get_trainer_defaults() -> Dict[str, Any]:
