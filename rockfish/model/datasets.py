@@ -121,8 +121,8 @@ class RFInferenceDataset(IterableDataset):
         self.end = len(self.offsets) if end_idx is None else end_idx
 
     def __iter__(self):
-        min_bin_idx = self.ref_len // 10
-        max_bin_idx = (4 * self.ref_len) // 10
+        min_bin_idx = 0  # self.ref_len // 10
+        max_bin_idx = 18  # (4 * self.ref_len) // 10
         bins = [list() for _ in range(max_bin_idx - min_bin_idx + 1)]
         stored = 0
 
@@ -133,7 +133,8 @@ class RFInferenceDataset(IterableDataset):
 
         for _ in range(self.start, self.end):
             example = RFExample.from_file(self.fd, self.ref_len)
-            bin = len(example.data.q_indices) // 10 - min_bin_idx
+            bin = len(example.data.q_indices
+                     ) // 10  # len(example.data.q_indices) // 10 - min_bin_idx
             bins[bin].append(example)
             stored += 1
 

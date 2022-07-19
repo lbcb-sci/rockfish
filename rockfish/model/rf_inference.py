@@ -76,6 +76,8 @@ def cat_outputs(src_paths: List[str], dest_path: str) -> None:
 
 
 def main(args: argparse.Namespace) -> None:
+    torch.multiprocessing.set_start_method('spawn')
+
     gpus = parse_gpus(args.gpus) if args.gpus is not None else None
 
     n_processes = 1 if gpus is None else len(gpus)
@@ -84,6 +86,7 @@ def main(args: argparse.Namespace) -> None:
 
     tqdm_queue = mp.Queue()
     output_paths = []
+    processes = []
     for i in range(n_processes):
         gpu_id = gpus[i] if gpus is not None else None
         worker_out_path = args.output + f'.{i}.tmp'
@@ -98,12 +101,15 @@ def main(args: argparse.Namespace) -> None:
                   tqdm_queue),
             daemon=False)  # Daemonic processes cannot have children
         process.start()
+        processes.append(process)
 
     with tqdm(total=n_examples) as pbar:
         while pbar.n < n_examples:  # Processes should finish when this is false
             n_processed = tqdm_queue.get()
             pbar.update(n_processed)
 
+    for process in processes:
+        process.join()
     cat_outputs(output_paths, args.output)
 
     # Delete temporary files
