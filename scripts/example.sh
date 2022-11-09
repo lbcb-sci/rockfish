@@ -9,8 +9,8 @@ cd example
 rockfish download -m small -s .
 
 # Run inference
-if [[ -z ${CUDA_VISIBLE_DEVICES} ]]; then
+if [[ -z ${GPUS} ]]; then
   rockfish inference -i fast5/ --model_path rf_small.ckpt -t 2 --reference chm13v2.0_chr20.fa.gz
 else
-  rockfish inference -i fast5/ --model_path rf_small.ckpt -d ${CUDA_VISIBLE_DEVICES} -t 2 --reference chm13v2.0_chr20.fa.gz
+  rockfish inference -i fast5/ --model_path rf_small.ckpt -d ${GPUS} -t 2 --reference chm13v2.0_chr20.fa.gz
 fi

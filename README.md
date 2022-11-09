@@ -75,9 +75,9 @@ Python requirements can be found in [setup.cfg](setup.cfg)
 ## Example
 Run the example script on 1000 pre-basecalled (Guppy 5.0.14. sup) fast5 files (sampled from Nanopolish [data](https://nanopolish.readthedocs.io/en/latest/quickstart_call_methylation.html)):
 ```shell
-CUDA_VISIBLE_DEVICES=<devices> ./scripts/example.sh
+GPUS=<devices> ./scripts/example.sh
 ```
-Note: Use CUDA_VISIBLE_DEVICES var to set GPUs for the inference. Omit CUDA_VISIBLE_DEVICES if the inference is run on CPU.
+Note: Use GPUS var to set GPUs for the inference. Omit GPUS if the inference is run on CPU.
 
 Result of the inference is ***predictions.tsv*** file. It is tab-delimited text file with four fileds:
   1. Read-id
