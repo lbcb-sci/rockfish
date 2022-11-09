@@ -40,7 +40,7 @@ def load_model(path: str, device: str, gpus: List[int]):
 
     block_size = model.block_size
 
-    if len(gpus) > 1:
+    if gpus is not None and len(gpus) > 1:
         model = DataParallel(model, gpus)
     model = model.to(device)
 
@@ -102,7 +102,7 @@ class Fast5Dataset(IterableDataset):
 
     def __init__(self, files: List[Path], ref_positions: MotifPositions,
                  aligner: mappy.Aligner, window: int, mapq_filter: int,
-                 unique_aln: bool, batch_size: int, block_size: int) -> None:
+                 unique_aln: bool, batch_size: int, block_size: int, device: str) -> None:
         super().__init__()
 
         self.files = files
@@ -114,6 +114,7 @@ class Fast5Dataset(IterableDataset):
         self.block_size = block_size
         self.bases_len = (2 * window) + 1
         self.batch_size = batch_size
+        self.device = device
 
         self.mapping_encodings = ReferenceMapping(self.bases_len, block_size)
 
@@ -160,7 +161,7 @@ class Fast5Dataset(IterableDataset):
     ) -> Tuple[str, str, int, torch.Tensor, torch.Tensor, torch.Tensor,
                torch.Tensor]:
         signal = torch.tensor(example.signal,
-                              dtype=torch.half).unfold(-1, self.block_size,
+                              dtype=torch.float if self.device == 'cpu' else torch.half).unfold(-1, self.block_size,
                                                        self.block_size)
         bases = torch.tensor([ENCODING.get(b, 4) for b in example.bases])
         q_indices = torch.tensor(example.q_indices.astype(np.int32))
@@ -202,7 +203,7 @@ def inference(args: argparse.Namespace) -> None:
 
     dataset = Fast5Dataset(files, ref_positions, aligner, args.window,
                            args.mapq_filter, args.unique_aln, args.batch_size,
-                           block_size)
+                           block_size, device)
     loader = DataLoader(dataset,
                         batch_size=args.batch_size,
                         num_workers=args.workers,
