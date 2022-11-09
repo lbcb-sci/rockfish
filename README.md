@@ -73,7 +73,7 @@ Python requirements can be found in [setup.cfg](setup.cfg)
 | Small | 6              | 6              | 128      | 1024        | dna_r9.4.1_450bps_sup.cfg |
 
 ## Example
-Run the example script on 1000 fast5 files (sampled from Nanopolish [data](https://nanopolish.readthedocs.io/en/latest/quickstart_call_methylation.html)):
+Run the example script on 1000 pre-basecalled (Guppy 5.0.14. sup) fast5 files (sampled from Nanopolish [data](https://nanopolish.readthedocs.io/en/latest/quickstart_call_methylation.html)):
 ```shell
 CUDA_VISIBLE_DEVICES=<devices> ./scripts/example.sh
 ```
