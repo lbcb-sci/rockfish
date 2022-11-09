@@ -54,7 +54,7 @@ def main(args):
 def get_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('-i', '--input', type=Path)
+    parser.add_argument('-i', '--input', type=Path, required=True)
     parser.add_argument('-o',
                         '--output',
                         type=Path,
