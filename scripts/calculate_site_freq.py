@@ -15,19 +15,23 @@ END_COL = (pl.col('pos') + 1).cast(pl.UInt32).alias('end')
 
 
 def parse_rockfish(path, get_predicted=False, type_suffix=''):
-    rockfish = pl.scan_csv(path, has_header=False, sep='\t')
+    rockfish = pl.scan_csv(path, has_header=True, sep='\t')
 
     if get_predicted:
-        value_col = pl.when(pl.col('column_4') > 0.5).then(1).otherwise(
-            0).alias(f'Rockfish{type_suffix}').cast(pl.UInt8)
+        value_col = pl.when(pl.col('prob') > 0.5).then(1).otherwise(0).alias(
+            f'Rockfish{type_suffix}').cast(pl.UInt8)
     else:
-        value_col = pl.col('column_4').alias(f'prob{type_suffix}').cast(
-            pl.Float32)
-
-    rockfish = rockfish.select([
+        value_col = pl.col('prob').alias(f'prob{type_suffix}').cast(pl.Float32)
+    '''rockfish = rockfish.select([
         pl.col('column_1').alias('read_id'),
         pl.col('column_2').alias('ctg').cast(pl.Categorical),
         pl.col('column_3').alias('pos').cast(pl.UInt32), value_col
+    ])'''
+
+    rockfish = rockfish.select([
+        pl.col('read_id'),
+        pl.col('ctg').cast(pl.Categorical),
+        pl.col('pos').cast(pl.UInt32), value_col
     ])
 
     return rockfish
