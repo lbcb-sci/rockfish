@@ -13,6 +13,9 @@ from .alignment import AlignmentData, AlignmentInfo, align_read
 
 MotifPositions = Dict[str, Tuple[Set[int], Set[int]]]
 
+MIN_N_BLOCKS = 8  # OLD VALUE = 31
+MAX_N_BLOCKS = 256  # OLD VALUE = 4 * 31 = 124
+
 
 @dataclass
 class Example:
@@ -134,7 +137,7 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         sig_end = seq_to_sig[q_end]
 
         n_blocks = (sig_end - sig_start) // read_info.block_stride
-        if n_blocks < example_bases or n_blocks > 4 * example_bases:
+        if n_blocks < MIN_N_BLOCKS or n_blocks > MAX_N_BLOCKS:
             continue
 
         move_start = (sig_start - seq_to_sig[0]) // read_info.block_stride

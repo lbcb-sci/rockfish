@@ -1,19 +1,20 @@
+from typing import *
+
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchmetrics import Accuracy, AveragePrecision, F1Score
-from torchmetrics.functional import accuracy as acc
-
-import pytorch_lightning as pl
+import wandb
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.utilities.cli import LightningCLI, LightningArgumentParser
-import wandb
+from pytorch_lightning.utilities.cli import (LightningArgumentParser,
+                                             LightningCLI)
+from torchmetrics import Accuracy, F1Score, Precision, Recall, Specificity
+from torchmetrics.functional import accuracy as acc
 
 from .datasets import RFDataModule
-from .layers import SignalPositionalEncoding, PositionalEncoding, SignalEncoder, AlignmentDecoder
-
-from typing import *
+from .layers import (AlignmentDecoder, PositionalEncoding, SignalEncoder,
+                     SignalPositionalEncoding)
 
 
 class Rockfish(pl.LightningModule):
@@ -37,7 +38,7 @@ class Rockfish(pl.LightningModule):
                  max_block_multiplier: int = 4,
                  separate_unk_mask: bool = True,
                  track_metrics: bool = True,
-                 singleton_weight: float = 1.2) -> None:
+                 singleton_weight: float = -1) -> None:
         super(Rockfish, self).__init__()
 
         if dim_ff is None:
@@ -63,9 +64,7 @@ class Rockfish(pl.LightningModule):
                 torch.tensor([1. / codebook_size] * codebook_size))
 
         max_signal_blocks = max_block_multiplier * bases_len
-        self.signal_pe = SignalPositionalEncoding(features,
-                                                  dropout=pos_dropout,
-                                                  max_len=max_signal_blocks)
+        self.signal_pe = SignalPositionalEncoding(features, dropout=pos_dropout)
 
         self.ref_embedding = nn.Embedding(self.mask_cls_label + 1, features)
         self.ref_pe = PositionalEncoding(features, pos_dropout, bases_len)
@@ -84,11 +83,13 @@ class Rockfish(pl.LightningModule):
             self.fc_mask = nn.Linear(features, self.mask_cls_label)
 
         if track_metrics:
-            self.val_acc = Accuracy()
-            self.val_ap = AveragePrecision()
-            self.ns_acc = Accuracy()
-            self.s_acc = Accuracy()
-            self.f1 = F1Score()
+            self.val_acc = Accuracy('binary')
+            self.ns_acc = Accuracy('binary')
+            self.s_acc = Accuracy('binary')
+            self.ppv = Precision('binary')
+            self.recall = Recall('binary')
+            self.tnr = Specificity('binary')
+            self.f1 = F1Score('binary')
 
     def create_padding_mask(self, num_blocks, blocks_len):
         repeats = torch.arange(0, blocks_len, device=num_blocks.device)  # S
@@ -218,11 +219,22 @@ class Rockfish(pl.LightningModule):
 
         return signal_mask_loss, diversity_loss, signal_mask_targets
 
+    def ce_loss(self, logits, labels, singletons):
+        if self.hparams.singleton_weight > 0:
+            loss_weights = torch.tensor([
+                self.hparams.singleton_weight if s else 1. for s in singletons
+            ],
+                                        device=self.device)
+        else:
+            loss_weights = None
+
+        return F.binary_cross_entropy_with_logits(logits,
+                                                  labels.float(),
+                                                  weight=loss_weights)
+
     def training_step(self, batch, batch_idx):
-        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, singleton = batch
-        loss_weights = torch.tensor(
-            [self.hparams.singleton_weight if s else 1. for s in singleton],
-            device=self.device)
+        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, singletons = batch
+        targets = (labels > 0.5).int()
 
         bases_mask = None
         if self.bases_mask_task:
@@ -236,20 +248,21 @@ class Rockfish(pl.LightningModule):
             num_blocks,
             bases_mask=bases_mask)
 
-        mod_loss = F.binary_cross_entropy_with_logits(mod_logits,
-                                                      labels.float(),
-                                                      weight=loss_weights)
+        mod_loss = self.ce_loss(mod_logits, labels, singletons)
 
         loss = mod_loss
         self.log('train_mod_loss', mod_loss)
-        self.log('train_mod_acc', acc(mod_logits, (labels > 0.5).int()))
+
+        mod_acc = acc(mod_logits, targets, task='binary')
+        self.log('train_mod_acc', mod_acc)
 
         if mask_logits is not None:
             mask_loss = F.cross_entropy(mask_logits, target_bases)
             loss += self.hparams.alpha * mask_loss
-
             self.log('train_mask_loss', mask_loss)
-            self.log('train_mask_acc', acc(mask_logits, target_bases))
+
+            mask_acc = acc(mask_logits, target_bases, task='multiclass')
+            self.log('train_mask_acc', mask_acc)
 
         if signal_code_logits is not None:
             signal_mask_loss, diversity_loss, signal_mask_targets = self.signal_masking_losses(
@@ -258,47 +271,56 @@ class Rockfish(pl.LightningModule):
 
             self.log('train_signal_mask_loss', signal_mask_loss)
             self.log('train_diversity_loss', diversity_loss)
-            self.log('train_signal_mask_acc',
-                     acc(context_code_logits, signal_mask_targets))
+
+            signal_mask_acc = acc(context_code_logits,
+                                  signal_mask_targets,
+                                  task='multiclass')
+            self.log('train_signal_mask_acc', signal_mask_acc)
 
         self.log('train_loss', loss)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, singleton = batch
-        loss_weights = torch.tensor(
-            [self.hparams.singleton_weight if s else 1. for s in singleton],
-            device=self.device)
+        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, singletons = batch
+        targets = (labels > 0.5).int()
 
         logits = self(signals, r_pos_enc, q_pos_enc, bases, num_blocks)
-        loss = F.binary_cross_entropy_with_logits(logits,
-                                                  labels.float(),
-                                                  weight=loss_weights)
-
+        loss = self.ce_loss(logits, labels, singletons)
         self.log('val_loss', loss, prog_bar=True)
 
-        targets = (labels > 0.5).int()
-        self.log('val_acc', self.val_acc(logits, targets), prog_bar=True)
-        self.log('val_ap', self.val_ap(logits, labels))
+        self.val_acc(logits, targets)
+        self.log('val_acc', self.val_acc, prog_bar=True)
 
-        self.log('non_singleton_acc',
-                 self.ns_acc(logits[~singleton], targets[~singleton]))
+        self.ns_acc(logits[~singletons], targets[~singletons])
+        self.log('non_singleton_acc', self.ns_acc)
 
-        self.log('singleton_acc',
-                 self.val_acc(logits[singleton], targets[singleton]))
+        self.s_acc(logits[singletons], targets[singletons])
+        self.log('singleton_acc', self.s_acc)
 
-        self.log('f1-score', self.f1(logits, targets))
+        self.ppv(logits, targets)
+        self.log('val_precision', self.ppv)
+
+        self.recall(logits, targets)
+        self.log('val_recall', self.recall)
+
+        self.tnr(logits, targets)
+        self.log('val_specificity', self.tnr)
+
+        self.f1(logits, targets)
+        self.log('f1-score', self.f1)
 
 
 def get_trainer_defaults() -> Dict[str, Any]:
     trainer_defaults = {}
 
     model_checkpoint = ModelCheckpoint(monitor='val_loss',
-                                       save_top_k=3,
+                                       save_top_k=5,
                                        mode='min')
     trainer_defaults['callbacks'] = [model_checkpoint]
 
-    wandb = WandbLogger(project='dna-mod', log_model=True, save_dir='wandb')
+    wandb = WandbLogger(project='dna-mod-revision',
+                        log_model=True,
+                        save_dir='wandb')
     trainer_defaults['logger'] = wandb
 
     return trainer_defaults
