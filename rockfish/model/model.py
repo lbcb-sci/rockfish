@@ -261,7 +261,10 @@ class Rockfish(pl.LightningModule):
             loss += self.hparams.alpha * mask_loss
             self.log('train_mask_loss', mask_loss)
 
-            mask_acc = acc(mask_logits, target_bases, task='multiclass')
+            mask_acc = acc(mask_logits,
+                           target_bases,
+                           task='multiclass',
+                           num_classes=self.mask_cls_label)
             self.log('train_mask_acc', mask_acc)
 
         if signal_code_logits is not None:
@@ -274,7 +277,8 @@ class Rockfish(pl.LightningModule):
 
             signal_mask_acc = acc(context_code_logits,
                                   signal_mask_targets,
-                                  task='multiclass')
+                                  task='multiclass',
+                                  num_classes=self.hparams.codebook_size)
             self.log('train_signal_mask_acc', signal_mask_acc)
 
         self.log('train_loss', loss)
