@@ -53,8 +53,9 @@ def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
                     read_info = load_read(read)
                     status, examples = extract_features(read_info,
                                                         ref_positions, aligner,
-                                                        buffer, window,
-                                                        mapq_filter, unique_aln)
+                                                        buffer, model_kmers,
+                                                        window, mapq_filter,
+                                                        unique_aln)
 
                     if examples is not None:
                         writer.write_examples(examples)
