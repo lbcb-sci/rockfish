@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import numpy as np
-
-from dataclasses import dataclass
-from struct import Struct
-from io import BufferedReader
 import sys
-
+from dataclasses import dataclass
+from io import BufferedReader
+from struct import Struct
 from typing import *
+
+import numpy as np
 
 
 @dataclass
@@ -64,8 +63,8 @@ class RFExampleHeader:
         return cls(read_id.decode(), ctg_id, pos, n_points, q_indices_len)
 
     def to_bytes(self) -> bytes:
-        return EXAMPLE_HEADER_STRUCT.pack(str.encode(self.read_id),
-                                          self.ctg_id, self.pos, self.n_points,
+        return EXAMPLE_HEADER_STRUCT.pack(str.encode(self.read_id), self.ctg_id,
+                                          self.pos, self.n_points,
                                           self.q_indices_len)
 
     def example_len(self, seq_len: int) -> int:
@@ -93,15 +92,18 @@ class RFExampleData:
     q_indices: np.ndarray
     event_lengths: np.ndarray
     bases: str
+    diff_means: np.ndarray
 
     def __init__(self, signal: DataArray, q_indices: DataArray,
-                 event_lengths: DataArray, bases: str) -> None:
+                 event_lengths: DataArray, bases: str,
+                 diff_menas: DataArray) -> None:
         super().__init__()
 
         self.signal = convert_array(signal, np.half)
         self.q_indices = convert_array(q_indices, np.ushort)
         self.event_lengths = convert_array(event_lengths, np.ushort)
         self.bases = bases
+        self.diff_means = convert_array(diff_menas, np.half)
 
     @classmethod
     def parse_bytes(cls, data: bytes, header: RFExampleHeader,
@@ -118,11 +120,15 @@ class RFExampleData:
         start, end = end, end + seq_len
         bases = data[start:end].decode()
 
-        return cls(signal, q_indices, event_lengths, bases)
+        start, end = end, end + 2 * seq_len
+        diff_means = np.frombuffer(data[start:end], np.half)
+
+        return cls(signal, q_indices, event_lengths, bases, diff_means)
 
     def to_bytes(self) -> bytes:
         return self.signal.tobytes() + self.q_indices.tobytes(
-        ) + self.event_lengths.tobytes() + str.encode(self.bases)
+        ) + self.event_lengths.tobytes() + str.encode(
+            self.bases) + self.diff_means.tobytes()
 
 
 @dataclass
@@ -131,17 +137,23 @@ class RFExample:
     data: RFExampleData
 
     @classmethod
-    def from_file(cls, fd: BufferedReader, seq_len: int, offset: Optional[int] = None) -> RFExample:
+    def from_file(cls,
+                  fd: BufferedReader,
+                  seq_len: int,
+                  offset: Optional[int] = None) -> RFExample:
         if offset is not None:
             fd.seek(offset)
 
-        header = RFExampleHeader.parse_bytes(fd.read(EXAMPLE_HEADER_STRUCT.size))
-        data = RFExampleData.parse_bytes(fd.read(header.example_len(seq_len)), header, seq_len)
+        header = RFExampleHeader.parse_bytes(fd.read(
+            EXAMPLE_HEADER_STRUCT.size))
+        data = RFExampleData.parse_bytes(fd.read(header.example_len(seq_len)),
+                                         header, seq_len)
 
         return cls(header, data)
 
 
 class DictLabels:
+
     def __init__(self, path: str) -> None:
         self.label_for_read = {}
         self.label_for_pos = {}
