@@ -179,5 +179,7 @@ class DictLabels:
             return self.label_for_read[read_id]
         elif (ctg, pos) in self.label_for_pos:
             return self.label_for_pos[(ctg, pos)]
+        elif (read_id, ctg, pos)  in self.label_for_read_pos:
+            return self.label_for_read_pos[(read_id, ctg, pos)]
 
-        return self.label_for_read_pos[(read_id, ctg, pos)]
+        raise KeyError('Label for the given example is not provided')

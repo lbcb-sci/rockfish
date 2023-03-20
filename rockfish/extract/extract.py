@@ -12,8 +12,8 @@ from .fast5 import ReadInfo
 
 MotifPositions = Dict[str, Tuple[Set[int], Set[int]]]
 
-MIN_N_BLOCKS = 8  # OLD VALUE = 31
-MAX_N_BLOCKS = 256  # OLD VALUE = 4 * 31 = 124
+MIN_N_BLOCKS = 16  # OLD VALUE = 31
+MAX_N_BLOCKS = 5 * 31  # OLD VALUE = 4 * 31 = 124
 
 
 @dataclass
