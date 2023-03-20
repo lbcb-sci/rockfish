@@ -155,7 +155,7 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         event_lens_cs = np.cumsum([0] + event_lengths)
         event_means = [
             np.mean(unnorm_signal[event_lens_cs[i]:event_lens_cs[i + 1]])
-            for i in range(event_lengths)
+            for i in range(len(event_lengths))
         ]
 
         model_means = [
