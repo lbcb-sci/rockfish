@@ -65,3 +65,5 @@ def load_model_kmers(path: Path) -> Dict[str, float]:
         for line in f:
             data = line.strip().split('\t')
             kmers[data[0]] = float(data[1])
+
+    return kmers
