@@ -98,7 +98,7 @@ def get_ref_pos(aln_data: AlignmentData, ref_positions: MotifPositions,
         rng = range(aln_data.r_end - 1 - window - 5,
                     aln_data.r_start - 1 + window + 1, -1)
 
-    for rel, rpos in enumerate(rng, start=window):
+    for rel, rpos in enumerate(rng, start=window+5):
         if rpos in ctg_pos:
             yield rel, rpos
 
@@ -158,10 +158,14 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
             for i in range(len(event_lengths))
         ]
 
-        model_means = [
-            model_kmers[ref_seq[i - 5:i + 1]]
-            for i in range(rel - window, rel + window + 1)
-        ]
+        try:
+            model_means = [
+                model_kmers[ref_seq[i - 5:i + 1]]
+                for i in range(rel - window, rel + window + 1)
+            ]
+        except KeyError:
+            print(rel, len(ref_seq))
+            exit(-1)
 
         diff_means = np.subtract(event_means, model_means)
 
