@@ -98,7 +98,7 @@ def get_ref_pos(aln_data: AlignmentData, ref_positions: MotifPositions,
         rng = range(aln_data.r_end - 1 - window - 5,
                     aln_data.r_start - 1 + window + 1, -1)
 
-    for rel, rpos in enumerate(rng, start=window+5):
+    for rel, rpos in enumerate(rng, start=window + 5):
         if rpos in ctg_pos:
             yield rel, rpos
 
@@ -155,6 +155,7 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         event_lens_cs = np.cumsum([0] + event_lengths)
         event_means = [
             np.mean(unnorm_signal[event_lens_cs[i]:event_lens_cs[i + 1]])
+            if event_lens_cs[i + 1] - event_lens_cs[i] > 0 else 0.
             for i in range(len(event_lengths))
         ]
 
