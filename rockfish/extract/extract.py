@@ -152,21 +152,17 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
             for p in range(rel - window, rel + window + 1)
         ]
 
-        event_lens_cs = np.cumsum([0] + event_lengths)
+        event_lens_cs = np.cumsum([sig_start] + event_lengths)
         event_means = [
             np.mean(unnorm_signal[event_lens_cs[i]:event_lens_cs[i + 1]])
             if event_lens_cs[i + 1] - event_lens_cs[i] > 0 else 0.
             for i in range(len(event_lengths))
         ]
 
-        try:
-            model_means = [
-                model_kmers[ref_seq[i - 5:i + 1]]
-                for i in range(rel - window, rel + window + 1)
-            ]
-        except KeyError:
-            print(rel, len(ref_seq))
-            exit(-1)
+        model_means = [
+            model_kmers[ref_seq[i - 5:i + 1]]
+            for i in range(rel - window, rel + window + 1)
+        ]
 
         diff_means = np.subtract(event_means, model_means)
 
