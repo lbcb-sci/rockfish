@@ -1,20 +1,21 @@
-import numpy as np
-import torch
-from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import Dataset, IterableDataset, DataLoader
-
-import pytorch_lightning as pl
-
+import math
+import sys
 from dataclasses import dataclass
 from io import BufferedReader
-import sys
-import math
-
 from typing import *
+
+import numpy as np
+import pytorch_lightning as pl
+import torch
+from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import DataLoader, Dataset, IterableDataset
 
 from rockfish.rf_format import *
 
 ENCODING = {b: i for i, b in enumerate('ACGTN')}
+
+DIFF_MEAN = -13.636132262100325
+DIFF_STD = 16.65758932006234
 
 
 def get_n_examples(idx_path: str) -> int:
@@ -85,13 +86,16 @@ class RFTrainDataset(Dataset):
         ref_mapping = self.reference_mapping(lengths)
         q_indices = torch.tensor(example.data.q_indices.astype(np.int32))
 
+        mean_diffs = torch.tensor(
+            (example.data.diff_means - DIFF_MEAN) / DIFF_STD)
+
         #label = self.labels.get_label(example.read_id, self.ctgs[example.ctg],
         #                              example.pos)
         label = self.labels[idx]
 
         singleton = True if example.data.bases.count('CG') == 1 else False
 
-        return signal, ref_mapping, q_indices, bases, label, singleton
+        return signal, ref_mapping, q_indices, bases, mean_diffs, label, singleton
 
 
 class RFInferenceDataset(IterableDataset):
@@ -183,7 +187,8 @@ class RFInferenceDataset(IterableDataset):
 
 
 def collate_fn_train(batch):
-    signals, ref_mapping, q_pos_enc, bases, labels, singleton = zip(*batch)
+    signals, ref_mapping, q_pos_enc, bases, mean_diffs, labels, singleton = zip(
+        *batch)
 
     num_blocks = torch.tensor([len(s) for s in signals])  # B
     signals = pad_sequence(signals,
@@ -191,12 +196,13 @@ def collate_fn_train(batch):
     ref_mapping = pad_sequence(ref_mapping, batch_first=True)  # [B, MAX_LEN]
     q_pos_enc = pad_sequence(q_pos_enc, batch_first=True)  # [B, MAX_LEN]
 
-    return signals, ref_mapping, q_pos_enc, torch.stack(
-        bases, 0), num_blocks, torch.tensor(labels), torch.tensor(singleton)
+    return signals, ref_mapping, q_pos_enc, torch.stack(bases, 0), torch.stack(
+        mean_diffs,
+        0), num_blocks, torch.tensor(labels), torch.tensor(singleton)
 
 
 def collate_fn_inference(batch):
-    read_ids, ctgs, positions, signals, bases, ref_mapping, q_indices = zip(
+    read_ids, ctgs, positions, signals, bases, mean_diffs, ref_mapping, q_indices = zip(
         *batch)
 
     num_blocks = torch.tensor([len(s) for s in signals])
@@ -205,7 +211,8 @@ def collate_fn_inference(batch):
     q_indices = pad_sequence(q_indices, batch_first=True)  # [B,MAX_LEN//5]
 
     return read_ids, ctgs, positions, signals, torch.stack(
-        bases, 0), ref_mapping, q_indices, num_blocks
+        bases, 0), torch.stack(mean_diffs,
+                               0), ref_mapping, q_indices, num_blocks
 
 
 def worker_init_train_fn(worker_id: int) -> None:

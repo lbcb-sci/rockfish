@@ -1,22 +1,21 @@
-import torch
-from torch.nn import DataParallel
-from torch.utils.data import IterableDataset, DataLoader
-import mappy
-
+import argparse
 import random
-from pathlib import Path
-from contextlib import ExitStack
 import sys
 import traceback
 import warnings
-import argparse
+from contextlib import ExitStack
+from pathlib import Path
+from typing import *
+
+import mappy
+import torch
+from torch.nn import DataParallel
+from torch.utils.data import DataLoader, IterableDataset
 
 from rockfish.extract.extract import Example, build_reference_idx2
 from rockfish.extract.main import *
-from rockfish.model.model import Rockfish
 from rockfish.model.datasets import *
-
-from typing import *
+from rockfish.model.model import Rockfish
 
 MIN_BLOCKS_LEN_FACTOR = 1
 MAX_BLOCKS_LEN_FACTOR = 4
@@ -102,7 +101,8 @@ class Fast5Dataset(IterableDataset):
 
     def __init__(self, files: List[Path], ref_positions: MotifPositions,
                  aligner: mappy.Aligner, window: int, mapq_filter: int,
-                 unique_aln: bool, batch_size: int, block_size: int, device: str) -> None:
+                 unique_aln: bool, batch_size: int, block_size: int,
+                 device: str) -> None:
         super().__init__()
 
         self.files = files
@@ -119,9 +119,10 @@ class Fast5Dataset(IterableDataset):
         self.mapping_encodings = ReferenceMapping(self.bases_len, block_size)
 
     def __iter__(self):
-        bins = ExampleBins(self.bases_len * MIN_BLOCKS_LEN_FACTOR,
+        '''bins = ExampleBins(self.bases_len * MIN_BLOCKS_LEN_FACTOR,
                            self.bases_len * MAX_BLOCKS_LEN_FACTOR,
-                           self.batch_size)
+                           self.batch_size)'''
+        bins = ExampleBins(16, 155, self.batch_size)
 
         buffer = mappy.ThreadBuffer()
         for file in self.files:
@@ -160,16 +161,18 @@ class Fast5Dataset(IterableDataset):
         self, example: Example
     ) -> Tuple[str, str, int, torch.Tensor, torch.Tensor, torch.Tensor,
                torch.Tensor]:
-        signal = torch.tensor(example.signal,
-                              dtype=torch.float if self.device == 'cpu' else torch.half).unfold(-1, self.block_size,
-                                                       self.block_size)
+        signal = torch.tensor(
+            example.signal,
+            dtype=torch.float if self.device == 'cpu' else torch.half).unfold(
+                -1, self.block_size, self.block_size)
         bases = torch.tensor([ENCODING.get(b, 4) for b in example.bases])
+        mean_diffs = torch.tensor((example.diff_means - DIFF_MEAN) / DIFF_STD)
         q_indices = torch.tensor(example.q_indices.astype(np.int32))
         lengths = torch.tensor(np.array(example.event_length).astype(np.int32))
 
         r_pos_enc = self.mapping_encodings(lengths)
 
-        return example.read_id, example.ctg, example.pos, signal, bases, r_pos_enc, q_indices
+        return example.read_id, example.ctg, example.pos, signal, bases, mean_diffs, r_pos_enc, q_indices
 
 
 def worker_init_fn(worker_id: int) -> None:
@@ -221,14 +224,15 @@ def inference(args: argparse.Namespace) -> None:
         if gpus is not None:
             manager.enter_context(torch.cuda.amp.autocast())
 
-        for ids, ctgs, positions, signals, bases, r_mappings, q_mappings, n_blocks in loader:
+        for ids, ctgs, positions, signals, bases, mean_diffs, r_mappings, q_mappings, n_blocks in loader:
             signals = signals.to(device)
             bases = bases.to(device)
+            mean_diffs = mean_diffs.to(device)
             r_mappings = r_mappings.to(device)
             q_mappings = q_mappings.to(device)
             n_blocks = n_blocks.to(device)
 
-            probs = model(signals, r_mappings, q_mappings, bases,
+            probs = model(signals, r_mappings, q_mappings, bases, mean_diffs,
                           n_blocks).sigmoid().cpu().numpy()
 
             for id, ctg, pos, prob in zip(ids, ctgs, positions, probs):
