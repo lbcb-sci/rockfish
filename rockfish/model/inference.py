@@ -124,6 +124,9 @@ class Fast5Dataset(IterableDataset):
                            self.batch_size)'''
         bins = ExampleBins(16, 155, self.batch_size)
 
+        model_kmers_path = files('rockfish.extract').joinpath('model_kmers.txt')
+        model_kmers = load_model_kmers(model_kmers_path)
+
         buffer = mappy.ThreadBuffer()
         for file in self.files:
             for read in get_reads(file):
@@ -136,9 +139,12 @@ class Fast5Dataset(IterableDataset):
                     continue
 
                 try:
-                    _, examples = extract_features(
-                        read_info, self.ref_positions, self.aligner, buffer,
-                        self.window, self.mapq_filter, self.unique_aln)
+                    _, examples = extract_features(read_info,
+                                                   self.ref_positions,
+                                                   self.aligner, buffer,
+                                                   model_kmers, self.window,
+                                                   self.mapq_filter,
+                                                   self.unique_aln)
                 except Exception as e:
                     print(
                         f'Cannot process read {read_info.read_id} from file {file}.',
