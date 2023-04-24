@@ -66,8 +66,8 @@ class Rockfish(pl.LightningModule):
         max_signal_blocks = max_block_multiplier * bases_len
         self.signal_pe = SignalPositionalEncoding(features, dropout=pos_dropout)
 
-        self.ref_embedding = nn.Embedding(self.mask_cls_label + 1, 5)
-        self.ref_encoding = nn.Linear(6, features)
+        self.ref_embedding = nn.Embedding(self.mask_cls_label + 1, features)
+        # self.ref_encoding = nn.Linear(6, features)
         self.ref_pe = PositionalEncoding(features, pos_dropout, bases_len)
 
         self.signal_encoder = SignalEncoder(features, nhead, dim_ff, n_layers,
@@ -124,8 +124,8 @@ class Rockfish(pl.LightningModule):
         signal = self.signal_norm(signal)
 
         bases = self.ref_embedding(bases)
-        bases = torch.cat((bases, mean_diffs.unsqueeze(-1)), dim=-1)
-        bases = self.ref_encoding(bases)
+        # bases = torch.cat((bases, mean_diffs.unsqueeze(-1)), dim=-1)
+        # bases = self.ref_encoding(bases)
         bases = self.ref_pe(bases)
         bases = self.alignment_decoder(bases, signal, signal_mask)
 
@@ -157,8 +157,8 @@ class Rockfish(pl.LightningModule):
         signal = self.signal_norm(signal)
 
         bases = self.ref_embedding(bases)
-        bases = torch.cat((bases, mean_diffs.unsqueeze(-1)), dim=-1)
-        bases = self.ref_encoding(bases)
+        # bases = torch.cat((bases, mean_diffs.unsqueeze(-1)), dim=-1)
+        # bases = self.ref_encoding(bases)
         bases = self.ref_pe(bases)
         bases = self.alignment_decoder(bases, signal, signal_mask)
 
