@@ -172,7 +172,7 @@ class Fast5Dataset(IterableDataset):
             dtype=torch.float if self.device == 'cpu' else torch.half).unfold(
                 -1, self.block_size, self.block_size)
         bases = torch.tensor([ENCODING.get(b, 4) for b in example.bases])
-        mean_diffs = torch.tensor((example.diff_means - DIFF_MEAN) / DIFF_STD)
+        mean_diffs = torch.tensor((example.diff_means - DIFF_MEAN) / DIFF_STD, dtype=torch.float)
         q_indices = torch.tensor(example.q_indices.astype(np.int32))
         lengths = torch.tensor(np.array(example.event_length).astype(np.int32))
 
