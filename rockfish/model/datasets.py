@@ -125,8 +125,8 @@ class RFInferenceDataset(IterableDataset):
         self.end = len(self.offsets) if end_idx is None else end_idx
 
     def __iter__(self):
-        min_bin_idx = self.ref_len // 10
-        max_bin_idx = (4 * self.ref_len) // 10
+        min_bin_idx = 16 // 10
+        max_bin_idx = 155 // 10
         bins = [list() for _ in range(max_bin_idx - min_bin_idx + 1)]
         stored = 0
 
@@ -181,9 +181,12 @@ class RFInferenceDataset(IterableDataset):
 
         r_pos_enc = self.mapping_encodings(lengths)
 
+        mean_diffs = torch.tensor(
+            (example.data.diff_means - DIFF_MEAN) / DIFF_STD)
+
         return example.header.read_id, self.ctgs[
             example.header.
-            ctg_id], example.header.pos, signal, bases, r_pos_enc, q_indices
+            ctg_id], example.header.pos, signal, bases, mean_diffs, r_pos_enc, q_indices
 
 
 def collate_fn_train(batch):

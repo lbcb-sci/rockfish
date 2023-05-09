@@ -1,18 +1,17 @@
+import argparse
+import fileinput
+import multiprocessing as mp
+import os
+import warnings
+from contextlib import ExitStack
+from typing import *
+
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import os
-import multiprocessing as mp
-import fileinput
-from contextlib import ExitStack
-import warnings
-import argparse
-
 from .datasets import *
 from .model import Rockfish
-
-from typing import *
 
 
 def parse_gpus(string: str) -> List[int]:
@@ -53,14 +52,15 @@ def inference_worker(args: argparse.Namespace, gpu: Optional[int],
         if gpu is not None:
             manager.enter_context(torch.cuda.amp.autocast())
 
-        for ids, ctgs, positions, signals, bases, r_mappings, q_mappings, n_blocks in loader:
+        for ids, ctgs, positions, signals, bases, mean_diffs, r_mappings, q_mappings, n_blocks in loader:
             signals = signals.to(device)
             bases = bases.to(device)
+            mean_diffs = mean_diffs.to(device)
             r_mappings = r_mappings.to(device)
             q_mappings = q_mappings.to(device)
             n_blocks = n_blocks.to(device)
 
-            logits = model(signals, r_mappings, q_mappings, bases,
+            logits = model(signals, r_mappings, q_mappings, bases, mean_diffs,
                            n_blocks).cpu().numpy()
 
             for id, ctg, pos, logit in zip(ids, ctgs, positions, logits):
