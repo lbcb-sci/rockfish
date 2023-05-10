@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import *
@@ -59,7 +60,7 @@ def load_read(read: Fast5Read) -> ReadInfo:
 
 
 def load_model_kmers(path: Path) -> Dict[str, float]:
-    kmers = {}
+    kmers = defaultdict(lambda: 0.0)
     with path.open() as f:
         next(f)  # Skip header
         for line in f:
