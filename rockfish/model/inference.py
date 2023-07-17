@@ -172,7 +172,8 @@ class Fast5Dataset(IterableDataset):
             dtype=torch.float if self.device == 'cpu' else torch.half).unfold(
                 -1, self.block_size, self.block_size)
         bases = torch.tensor([ENCODING.get(b, 4) for b in example.bases])
-        mean_diffs = torch.tensor((example.diff_means - DIFF_MEAN) / DIFF_STD, dtype=torch.float)
+        mean_diffs = torch.tensor((example.diff_means - DIFF_MEAN) / DIFF_STD,
+                                  dtype=torch.float)
         q_indices = torch.tensor(example.q_indices.astype(np.int32))
         lengths = torch.tensor(np.array(example.event_length).astype(np.int32))
 
@@ -238,11 +239,14 @@ def inference(args: argparse.Namespace) -> None:
             q_mappings = q_mappings.to(device)
             n_blocks = n_blocks.to(device)
 
-            probs = model(signals, r_mappings, q_mappings, bases, mean_diffs,
-                          n_blocks).sigmoid().cpu().numpy()
+            out = model(signals, r_mappings, q_mappings, bases, mean_diffs,
+                        n_blocks)
+            if not args.logits:
+                out = out.sigmoid()
+            out = out.cpu().numpy()
 
-            for id, ctg, pos, prob in zip(ids, ctgs, positions, probs):
-                print(id, ctg, pos, prob, file=output_file, sep='\t')
+            for id, ctg, pos, o in zip(ids, ctgs, positions, out):
+                print(id, ctg, pos, o, file=output_file, sep='\t')
 
             pbar.update(n=len(positions))
 
@@ -266,6 +270,7 @@ def add_inference_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('-b', '--batch_size', type=int, default=4096)
     # parser.add_argument('--combined_mask', action='store_true')
 
+    parser.add_argument('-l', '--logits', action='store_true')
     parser.add_argument('-o', '--output', type=str, default='predictions.tsv')
 
 

@@ -25,7 +25,6 @@ class Example:
     event_length: List[int]
     bases: str
     q_indices: np.ndarray
-    diff_means: np.ndarray
 
 
 def build_reference_idx(aligner: mappy.Aligner, motif: str,
@@ -91,12 +90,10 @@ def get_ref_pos(aln_data: AlignmentData, ref_positions: MotifPositions,
         ctg_pos = ref_positions[aln_data.ctg][1]
 
     if aln_data.fwd_strand:
-        # +5 and -1 added due to model kmers
-        rng = range(aln_data.r_start + window + 5, aln_data.r_end - window - 1)
+        rng = range(aln_data.r_start + window, aln_data.r_end - window)
     else:
-        # -5 and +1 added due to model kmers
-        rng = range(aln_data.r_end - 1 - window - 5,
-                    aln_data.r_start - 1 + window + 1, -1)
+        rng = range(aln_data.r_end - 1 - window, aln_data.r_start - 1 + window,
+                    -1)
 
     for rel, rpos in enumerate(rng, start=window + 5):
         if rpos in ctg_pos:
@@ -112,8 +109,7 @@ def get_event_length(position: int, ref_to_query: np.ndarray,
 
 def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
                      aligner: mappy.Aligner, buffer: mappy.ThreadBuffer,
-                     model_kmers: Dict[str,
-                                       float], window: int, mapq_filter: int,
+                     window: int, mapq_filter: int,
                      unique_aln: bool) -> Tuple[AlignmentInfo, List[Example]]:
     seq_to_sig = read_info.get_seq_to_sig()
     unnorm_signal = read_info.get_unnormalized_signal(end=seq_to_sig[-1])
@@ -159,17 +155,15 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
             for i in range(len(event_lengths))
         ]
 
-        model_means = [
-            model_kmers[ref_seq[i - 5:i + 1]]
-            for i in range(rel - window, rel + window + 1)
-        ]
-
-        diff_means = np.subtract(event_means, model_means)
-
-        example = Example(read_info.read_id, aln_data.ctg, pos,
-                          signal[sig_start:sig_end], event_lengths,
-                          ref_seq[rel - window:rel + window + 1], q_indices,
-                          diff_means)
+        example = Example(
+            read_info.read_id,
+            aln_data.ctg,
+            pos,
+            signal[sig_start:sig_end],
+            event_lengths,
+            ref_seq[rel - window:rel + window + 1],
+            q_indices,
+        )
         examples.append(example)
 
     return status, examples

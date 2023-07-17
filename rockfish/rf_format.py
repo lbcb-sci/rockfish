@@ -68,7 +68,7 @@ class RFExampleHeader:
                                           self.q_indices_len)
 
     def example_len(self, seq_len: int) -> int:
-        return 2 * self.n_points + 2 * self.q_indices_len + 3 * seq_len + 2 * seq_len  # 2*S For current diff
+        return 2 * self.n_points + 2 * self.q_indices_len + 3 * seq_len
 
 
 DataArray = Union[List, np.ndarray]
@@ -92,18 +92,20 @@ class RFExampleData:
     q_indices: np.ndarray
     event_lengths: np.ndarray
     bases: str
-    diff_means: np.ndarray
 
-    def __init__(self, signal: DataArray, q_indices: DataArray,
-                 event_lengths: DataArray, bases: str,
-                 diff_menas: DataArray) -> None:
+    def __init__(
+        self,
+        signal: DataArray,
+        q_indices: DataArray,
+        event_lengths: DataArray,
+        bases: str,
+    ) -> None:
         super().__init__()
 
         self.signal = convert_array(signal, np.half)
         self.q_indices = convert_array(q_indices, np.ushort)
         self.event_lengths = convert_array(event_lengths, np.ushort)
         self.bases = bases
-        self.diff_means = convert_array(diff_menas, np.half)
 
     @classmethod
     def parse_bytes(cls, data: bytes, header: RFExampleHeader,
@@ -120,15 +122,11 @@ class RFExampleData:
         start, end = end, end + seq_len
         bases = data[start:end].decode()
 
-        start, end = end, end + 2 * seq_len
-        diff_means = np.frombuffer(data[start:end], np.half)
-
-        return cls(signal, q_indices, event_lengths, bases, diff_means)
+        return cls(signal, q_indices, event_lengths, bases)
 
     def to_bytes(self) -> bytes:
         return self.signal.tobytes() + self.q_indices.tobytes(
-        ) + self.event_lengths.tobytes() + str.encode(
-            self.bases) + self.diff_means.tobytes()
+        ) + self.event_lengths.tobytes() + str.encode(self.bases)
 
 
 @dataclass

@@ -111,8 +111,7 @@ class Rockfish(pl.LightningModule):
     def get_context_code_probs(self, signal, masks):
         return self.codebook(signal[masks])
 
-    def forward(self, signal, r_pos_enc, q_pos_enc, bases, mean_diffs,
-                num_blocks):
+    def forward(self, signal, r_pos_enc, q_pos_enc, bases, num_blocks):
         B, S, _ = signal.shape
 
         signal = self.signal_embedding(signal)  # BxSxE
@@ -124,8 +123,6 @@ class Rockfish(pl.LightningModule):
         signal = self.signal_norm(signal)
 
         bases = self.ref_embedding(bases)
-        # bases = torch.cat((bases, mean_diffs.unsqueeze(-1)), dim=-1)
-        # bases = self.ref_encoding(bases)
         bases = self.ref_pe(bases)
         bases = self.alignment_decoder(bases, signal, signal_mask)
 
@@ -138,7 +135,6 @@ class Rockfish(pl.LightningModule):
                       r_pos_enc,
                       q_pos_enc,
                       bases,
-                      mean_diffs,
                       num_blocks,
                       bases_mask=None):
         B, S, _ = signal.shape
@@ -157,8 +153,6 @@ class Rockfish(pl.LightningModule):
         signal = self.signal_norm(signal)
 
         bases = self.ref_embedding(bases)
-        # bases = torch.cat((bases, mean_diffs.unsqueeze(-1)), dim=-1)
-        # bases = self.ref_encoding(bases)
         bases = self.ref_pe(bases)
         bases = self.alignment_decoder(bases, signal, signal_mask)
 
@@ -240,7 +234,7 @@ class Rockfish(pl.LightningModule):
                                                   weight=loss_weights)
 
     def training_step(self, batch, batch_idx):
-        signals, r_pos_enc, q_pos_enc, bases, mean_diffs, num_blocks, labels, singletons = batch
+        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, singletons = batch
         targets = (labels > 0.5).int()
 
         bases_mask = None
@@ -252,7 +246,6 @@ class Rockfish(pl.LightningModule):
             r_pos_enc,
             q_pos_enc,
             bases,
-            mean_diffs,
             num_blocks,
             bases_mask=bases_mask)
 
@@ -293,11 +286,10 @@ class Rockfish(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        signals, r_pos_enc, q_pos_enc, bases, mean_diffs, num_blocks, labels, singletons = batch
+        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, singletons = batch
         targets = (labels > 0.5).int()
 
-        logits = self(signals, r_pos_enc, q_pos_enc, bases, mean_diffs,
-                      num_blocks)
+        logits = self(signals, r_pos_enc, q_pos_enc, bases, num_blocks)
         loss = self.ce_loss(logits, labels, singletons)
         self.log('val_loss', loss, prog_bar=True)
 

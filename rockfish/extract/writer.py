@@ -28,9 +28,12 @@ class BinaryWriter:
         header = RFExampleHeader(example.read_id, self.ref_ids[example.ctg],
                                  example.pos, len(example.signal),
                                  len(example.q_indices)).to_bytes()
-        data = RFExampleData(example.signal, example.q_indices,
-                             example.event_length, example.bases,
-                             example.diff_means).to_bytes()
+        data = RFExampleData(
+            example.signal,
+            example.q_indices,
+            example.event_length,
+            example.bases,
+        ).to_bytes()
 
         return header + data
 

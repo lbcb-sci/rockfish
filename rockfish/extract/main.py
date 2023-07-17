@@ -15,7 +15,7 @@ from rockfish.rftools.merge import merge
 
 from .alignment import AlignmentInfo, get_aligner
 from .extract import MotifPositions, build_reference_idx2, extract_features
-from .fast5 import load_model_kmers, load_read
+from .fast5 import load_read
 from .writer import BinaryWriter
 
 
@@ -38,8 +38,8 @@ def get_reads(path: Path) -> Generator[Fast5Read, None, None]:
 
 
 def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
-                   model_kmers: Dict[str, float], window: int, mapq_filter: int,
-                   unique_aln: bool, dest_path: Path, in_queue: mp.Queue,
+                   window: int, mapq_filter: int, unique_aln: bool,
+                   dest_path: Path, in_queue: mp.Queue,
                    out_queue: mp.Queue) -> None:
     with BinaryWriter(dest_path, ref_positions.keys(),
                       2 * window + 1) as writer:
@@ -53,9 +53,8 @@ def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
                     read_info = load_read(read)
                     status, examples = extract_features(read_info,
                                                         ref_positions, aligner,
-                                                        buffer, model_kmers,
-                                                        window, mapq_filter,
-                                                        unique_aln)
+                                                        buffer, window,
+                                                        mapq_filter, unique_aln)
 
                     if examples is not None:
                         writer.write_examples(examples)
@@ -92,9 +91,6 @@ def extract(args: argparse.Namespace) -> None:
     ref_positions = build_reference_idx2(aligner, args.motif, args.idx,
                                          args.workers)
 
-    model_kmers_path = files('rockfish.extract').joinpath('model_kmers.txt')
-    model_kmers = load_model_kmers(model_kmers_path)
-
     out_queue = mp.Queue()
 
     workers = [None] * n_workers
@@ -102,10 +98,9 @@ def extract(args: argparse.Namespace) -> None:
     for i in range(n_workers):
         writers_path[i] = args.dest.parent / (args.dest.name + f'.{i}.tmp')
         workers[i] = mp.Process(target=process_worker,
-                                args=(aligner, ref_positions, model_kmers,
-                                      args.window, args.mapq_filter,
-                                      args.unique, writers_path[i], in_queue,
-                                      out_queue),
+                                args=(aligner, ref_positions, args.window,
+                                      args.mapq_filter, args.unique,
+                                      writers_path[i], in_queue, out_queue),
                                 daemon=True)
         workers[i].start()
 

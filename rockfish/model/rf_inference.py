@@ -52,15 +52,14 @@ def inference_worker(args: argparse.Namespace, gpu: Optional[int],
         if gpu is not None:
             manager.enter_context(torch.cuda.amp.autocast())
 
-        for ids, ctgs, positions, signals, bases, mean_diffs, r_mappings, q_mappings, n_blocks in loader:
+        for ids, ctgs, positions, signals, bases, r_mappings, q_mappings, n_blocks in loader:
             signals = signals.to(device)
             bases = bases.to(device)
-            mean_diffs = mean_diffs.to(device)
             r_mappings = r_mappings.to(device)
             q_mappings = q_mappings.to(device)
             n_blocks = n_blocks.to(device)
 
-            logits = model(signals, r_mappings, q_mappings, bases, mean_diffs,
+            logits = model(signals, r_mappings, q_mappings, bases,
                            n_blocks).cpu().numpy()
 
             for id, ctg, pos, logit in zip(ids, ctgs, positions, logits):

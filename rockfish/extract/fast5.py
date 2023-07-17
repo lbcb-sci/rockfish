@@ -57,14 +57,3 @@ def load_read(read: Fast5Read) -> ReadInfo:
     signal = read.get_raw_data(start=start, scale=True)
 
     return ReadInfo(read.read_id, fastq, signal, move_table, block_stride)
-
-
-def load_model_kmers(path: Path) -> Dict[str, float]:
-    kmers = defaultdict(lambda: 0.0)
-    with path.open() as f:
-        next(f)  # Skip header
-        for line in f:
-            data = line.strip().split('\t')
-            kmers[data[0]] = float(data[1])
-
-    return kmers
