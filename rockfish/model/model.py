@@ -69,9 +69,16 @@ class Rockfish(pl.LightningModule):
         self.ref_embedding = nn.Embedding(self.mask_cls_label + 1, features)
         # self.ref_encoding = nn.Linear(6, features)
         self.ref_pe = PositionalEncoding(features, pos_dropout, bases_len)
-
-        self.signal_encoder = SignalEncoder(features, nhead, dim_ff, n_layers,
-                                            attn_dropout)
+        '''self.signal_encoder = SignalEncoder(features, nhead, dim_ff, n_layers,
+                                            attn_dropout)'''
+        encoder_layer = nn.TransformerEncoderLayer(features,
+                                                   nhead,
+                                                   dim_ff,
+                                                   attn_dropout,
+                                                   'gelu',
+                                                   batch_first=True,
+                                                   norm_first=True)
+        self.signal_encoder = nn.TransformerEncoder(encoder_layer, n_layers)
         self.signal_norm = nn.LayerNorm(features)
 
         self.alignment_decoder = AlignmentDecoder(features, nhead, dim_ff,
