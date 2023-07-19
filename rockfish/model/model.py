@@ -126,7 +126,7 @@ class Rockfish(pl.LightningModule):
 
         signal_mask = self.create_padding_mask(num_blocks, S)  # BxS_out
 
-        signal = self.signal_encoder(signal, signal_mask)
+        signal = self.signal_encoder(signal, src_key_padding_mask=signal_mask)
         signal = self.signal_norm(signal)
 
         bases = self.ref_embedding(bases)
@@ -156,7 +156,7 @@ class Rockfish(pl.LightningModule):
 
         signal = self.signal_pe(signal, r_pos_enc, q_pos_enc, masks)
 
-        signal = self.signal_encoder(signal, signal_mask)
+        signal = self.signal_encoder(signal, src_key_padding_mask=signal_mask)
         signal = self.signal_norm(signal)
 
         bases = self.ref_embedding(bases)
@@ -325,9 +325,10 @@ class Rockfish(pl.LightningModule):
 def get_trainer_defaults() -> Dict[str, Any]:
     trainer_defaults = {}
 
-    model_checkpoint = ModelCheckpoint(monitor='val_loss',
+    model_checkpoint = ModelCheckpoint(monitor='f1-score',
+                                       filename='{step}-{f1-score:.5f}',
                                        save_top_k=5,
-                                       mode='min')
+                                       mode='max')
     trainer_defaults['callbacks'] = [model_checkpoint]
 
     wandb = WandbLogger(project='dna-mod-revision',
