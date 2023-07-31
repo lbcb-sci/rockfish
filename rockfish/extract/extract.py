@@ -95,7 +95,7 @@ def get_ref_pos(aln_data: AlignmentData, ref_positions: MotifPositions,
         rng = range(aln_data.r_end - 1 - window, aln_data.r_start - 1 + window,
                     -1)
 
-    for rel, rpos in enumerate(rng, start=window + 5):
+    for rel, rpos in enumerate(rng, start=window):
         if rpos in ctg_pos:
             yield rel, rpos
 
@@ -112,7 +112,6 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
                      window: int, mapq_filter: int,
                      unique_aln: bool) -> Tuple[AlignmentInfo, List[Example]]:
     seq_to_sig = read_info.get_seq_to_sig()
-    unnorm_signal = read_info.get_unnormalized_signal(end=seq_to_sig[-1])
     signal = read_info.get_normalized_signal(end=seq_to_sig[-1]) \
                         .astype(np.half)
     query, _ = read_info.get_seq_and_quals()
@@ -146,13 +145,6 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         event_lengths = [
             get_event_length(p, aln_data.ref_to_query, seq_to_sig)
             for p in range(rel - window, rel + window + 1)
-        ]
-
-        event_lens_cs = np.cumsum([sig_start] + event_lengths)
-        event_means = [
-            np.mean(unnorm_signal[event_lens_cs[i]:event_lens_cs[i + 1]])
-            if event_lens_cs[i + 1] - event_lens_cs[i] > 0 else 0.
-            for i in range(len(event_lengths))
         ]
 
         example = Example(

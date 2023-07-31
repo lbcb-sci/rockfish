@@ -17,8 +17,8 @@ from rockfish.extract.main import *
 from rockfish.model.datasets import *
 from rockfish.model.model import Rockfish
 
-MIN_BLOCKS_LEN_FACTOR = 1
-MAX_BLOCKS_LEN_FACTOR = 4
+MIN_BLOCKS_LEN_FACTOR = 0.5
+MAX_BLOCKS_LEN_FACTOR = 5
 
 HEADER = '\t'.join(['read_id', 'ctg', 'pos', 'prob'])
 
@@ -119,10 +119,9 @@ class Fast5Dataset(IterableDataset):
         self.mapping_encodings = ReferenceMapping(self.bases_len, block_size)
 
     def __iter__(self):
-        '''bins = ExampleBins(self.bases_len * MIN_BLOCKS_LEN_FACTOR,
-                           self.bases_len * MAX_BLOCKS_LEN_FACTOR,
-                           self.batch_size)'''
-        bins = ExampleBins(16, 155, self.batch_size)
+        bins = ExampleBins(int(self.bases_len * MIN_BLOCKS_LEN_FACTOR),
+                           int(self.bases_len * MAX_BLOCKS_LEN_FACTOR),
+                           self.batch_size)
 
         buffer = mappy.ThreadBuffer()
         for file in self.files:
@@ -143,6 +142,7 @@ class Fast5Dataset(IterableDataset):
                                                    self.mapq_filter,
                                                    self.unique_aln)
                 except Exception as e:
+                    print(traceback.format_exc())
                     print(
                         f'Cannot process read {read_info.read_id} from file {file}.',
                         file=sys.stderr)
