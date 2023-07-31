@@ -124,9 +124,6 @@ class Fast5Dataset(IterableDataset):
                            self.batch_size)'''
         bins = ExampleBins(16, 155, self.batch_size)
 
-        model_kmers_path = files('rockfish.extract').joinpath('model_kmers.txt')
-        model_kmers = load_model_kmers(model_kmers_path)
-
         buffer = mappy.ThreadBuffer()
         for file in self.files:
             for read in get_reads(file):
@@ -142,7 +139,7 @@ class Fast5Dataset(IterableDataset):
                     _, examples = extract_features(read_info,
                                                    self.ref_positions,
                                                    self.aligner, buffer,
-                                                   model_kmers, self.window,
+                                                   self.window,
                                                    self.mapq_filter,
                                                    self.unique_aln)
                 except Exception as e:
@@ -172,14 +169,12 @@ class Fast5Dataset(IterableDataset):
             dtype=torch.float if self.device == 'cpu' else torch.half).unfold(
                 -1, self.block_size, self.block_size)
         bases = torch.tensor([ENCODING.get(b, 4) for b in example.bases])
-        mean_diffs = torch.tensor((example.diff_means - DIFF_MEAN) / DIFF_STD,
-                                  dtype=torch.float)
         q_indices = torch.tensor(example.q_indices.astype(np.int32))
         lengths = torch.tensor(np.array(example.event_length).astype(np.int32))
 
         r_pos_enc = self.mapping_encodings(lengths)
 
-        return example.read_id, example.ctg, example.pos, signal, bases, mean_diffs, r_pos_enc, q_indices
+        return example.read_id, example.ctg, example.pos, signal, bases, r_pos_enc, q_indices
 
 
 def worker_init_fn(worker_id: int) -> None:
@@ -231,15 +226,14 @@ def inference(args: argparse.Namespace) -> None:
         if gpus is not None:
             manager.enter_context(torch.cuda.amp.autocast())
 
-        for ids, ctgs, positions, signals, bases, mean_diffs, r_mappings, q_mappings, n_blocks in loader:
+        for ids, ctgs, positions, signals, bases, r_mappings, q_mappings, n_blocks in loader:
             signals = signals.to(device)
             bases = bases.to(device)
-            mean_diffs = mean_diffs.to(device)
             r_mappings = r_mappings.to(device)
             q_mappings = q_mappings.to(device)
             n_blocks = n_blocks.to(device)
 
-            out = model(signals, r_mappings, q_mappings, bases, mean_diffs,
+            out = model(signals, r_mappings, q_mappings, bases,
                         n_blocks)
             if not args.logits:
                 out = out.sigmoid()
