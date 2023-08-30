@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import numpy as np
-
-from dataclasses import dataclass
-from struct import Struct
-from io import BufferedReader
 import sys
-
+from dataclasses import dataclass
+from io import BufferedReader
+from struct import Struct
 from typing import *
+
+import numpy as np
 
 
 @dataclass
@@ -45,7 +44,7 @@ class RFHeader:
         return 2 + len(self.ctgs) + sum([len(c) for c in self.ctgs]) + 4
 
 
-EXAMPLE_HEADER_STRUCT = Struct('=36sHIHH')
+EXAMPLE_HEADER_STRUCT = Struct('=36sHIH')
 
 
 @dataclass
@@ -54,22 +53,19 @@ class RFExampleHeader:
     ctg_id: int
     pos: int
     n_points: int
-    q_indices_len: int
 
     @classmethod
     def parse_bytes(cls, data: bytes) -> RFExampleHeader:
-        read_id, ctg_id, pos, n_points, q_indices_len = EXAMPLE_HEADER_STRUCT.unpack(
-            data)
+        read_id, ctg_id, pos, n_points = EXAMPLE_HEADER_STRUCT.unpack(data)
 
-        return cls(read_id.decode(), ctg_id, pos, n_points, q_indices_len)
+        return cls(read_id.decode(), ctg_id, pos, n_points)
 
     def to_bytes(self) -> bytes:
-        return EXAMPLE_HEADER_STRUCT.pack(str.encode(self.read_id),
-                                          self.ctg_id, self.pos, self.n_points,
-                                          self.q_indices_len)
+        return EXAMPLE_HEADER_STRUCT.pack(str.encode(self.read_id), self.ctg_id,
+                                          self.pos, self.n_points)
 
     def example_len(self, seq_len: int) -> int:
-        return 2 * self.n_points + 2 * self.q_indices_len + 3 * seq_len
+        return 2 * self.n_points + seq_len
 
 
 DataArray = Union[List, np.ndarray]
@@ -90,17 +86,12 @@ def convert_array(data: DataArray, dtype: np.dtype) -> np.ndarray:
 @dataclass
 class RFExampleData:
     signal: np.ndarray
-    q_indices: np.ndarray
-    event_lengths: np.ndarray
     bases: str
 
-    def __init__(self, signal: DataArray, q_indices: DataArray,
-                 event_lengths: DataArray, bases: str) -> None:
+    def __init__(self, signal: DataArray, bases: str) -> None:
         super().__init__()
 
         self.signal = convert_array(signal, np.half)
-        self.q_indices = convert_array(q_indices, np.ushort)
-        self.event_lengths = convert_array(event_lengths, np.ushort)
         self.bases = bases
 
     @classmethod
@@ -109,20 +100,13 @@ class RFExampleData:
         start, end = 0, 2 * header.n_points
         signal = np.frombuffer(data[start:end], np.half)
 
-        start, end = end, end + 2 * header.q_indices_len
-        q_indices = np.frombuffer(data[start:end], np.ushort)
-
-        start, end = end, end + 2 * seq_len
-        event_lengths = np.frombuffer(data[start:end], np.ushort)
-
         start, end = end, end + seq_len
         bases = data[start:end].decode()
 
-        return cls(signal, q_indices, event_lengths, bases)
+        return cls(signal, bases)
 
     def to_bytes(self) -> bytes:
-        return self.signal.tobytes() + self.q_indices.tobytes(
-        ) + self.event_lengths.tobytes() + str.encode(self.bases)
+        return self.signal.tobytes() + str.encode(self.bases)
 
 
 @dataclass
@@ -131,17 +115,23 @@ class RFExample:
     data: RFExampleData
 
     @classmethod
-    def from_file(cls, fd: BufferedReader, seq_len: int, offset: Optional[int] = None) -> RFExample:
+    def from_file(cls,
+                  fd: BufferedReader,
+                  seq_len: int,
+                  offset: Optional[int] = None) -> RFExample:
         if offset is not None:
             fd.seek(offset)
 
-        header = RFExampleHeader.parse_bytes(fd.read(EXAMPLE_HEADER_STRUCT.size))
-        data = RFExampleData.parse_bytes(fd.read(header.example_len(seq_len)), header, seq_len)
+        header = RFExampleHeader.parse_bytes(fd.read(
+            EXAMPLE_HEADER_STRUCT.size))
+        data = RFExampleData.parse_bytes(fd.read(header.example_len(seq_len)),
+                                         header, seq_len)
 
         return cls(header, data)
 
 
 class DictLabels:
+
     def __init__(self, path: str) -> None:
         self.label_for_read = {}
         self.label_for_pos = {}

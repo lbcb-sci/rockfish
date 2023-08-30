@@ -1,17 +1,18 @@
-import numpy as np
-import mappy
-
 import multiprocessing as mp
+import re
 from dataclasses import dataclass
 from functools import partial
-import re
-
 from typing import *
 
-from .fast5 import ReadInfo
-from .alignment import AlignmentData, AlignmentInfo, align_read
+import mappy
+import numpy as np
+from alignment import AlignmentData, AlignmentInfo, align_read
+from fast5 import ReadInfo
 
 MotifPositions = Dict[str, Tuple[Set[int], Set[int]]]
+
+MIN_BLOCK_MUL = 0.5
+MAX_BLOCK_MUL = 5
 
 
 @dataclass
@@ -20,9 +21,7 @@ class Example:
     ctg: str
     pos: int
     signal: np.ndarray
-    event_length: List[int]
     bases: str
-    q_indices: np.ndarray
 
 
 def build_reference_idx(aligner: mappy.Aligner, motif: str,
@@ -134,21 +133,13 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         sig_end = seq_to_sig[q_end]
 
         n_blocks = (sig_end - sig_start) // read_info.block_stride
-        if n_blocks < example_bases or n_blocks > 4 * example_bases:
+        if n_blocks < MIN_BLOCK_MUL * example_bases or n_blocks > MAX_BLOCK_MUL * example_bases:
             continue
 
-        move_start = (sig_start - seq_to_sig[0]) // read_info.block_stride
-        move_end = (sig_end - seq_to_sig[0]) // read_info.block_stride
-        q_indices = read_info.move_table[move_start:move_end].cumsum() - 1
-
-        event_lengts = [
-            get_event_length(p, aln_data.ref_to_query, seq_to_sig)
-            for p in range(rel - window, rel + window + 1)
-        ]
-
+        # query sequence: query[q_start:q_end]
         example = Example(read_info.read_id, aln_data.ctg, pos,
-                          signal[sig_start:sig_end], event_lengts,
-                          ref_seq[rel - window:rel + window + 1], q_indices)
+                          signal[sig_start:sig_end],
+                          ref_seq[rel - window:rel + window + 1])
         examples.append(example)
 
     return status, examples
