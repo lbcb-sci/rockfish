@@ -123,7 +123,8 @@ class Fast5Dataset(IterableDataset):
                            int(self.bases_len * MAX_BLOCKS_LEN_FACTOR),
                            self.batch_size)
 
-        buffer = mappy.ThreadBuffer()
+        # buffer = mappy.ThreadBuffer()
+        buffer = None
         for file in self.files:
             for read in get_reads(file):
                 try:
