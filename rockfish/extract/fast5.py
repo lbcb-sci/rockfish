@@ -39,9 +39,6 @@ class ReadInfo:
 
         return (signal - med) / (1.4826 * mad)
 
-    def get_unnormalized_signal(self, start=0, end=None) -> np.ndarray:
-        return self.signal[start:end]
-
 
 def load_read(read: Fast5Read) -> ReadInfo:
     bc_analysis = read.get_latest_analysis('Basecall_1D')

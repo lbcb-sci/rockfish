@@ -1,7 +1,6 @@
 import argparse
 import random
 import sys
-import traceback
 import warnings
 from contextlib import ExitStack
 from pathlib import Path
@@ -19,7 +18,8 @@ from rockfish.extract.main import *
 from rockfish.model.datasets import *
 from rockfish.model.model import Rockfish
 
-HEADER = '\t'.join(['read_id', 'ctg', 'pos', 'prob'])
+HEADER_PROBS = '\t'.join(['read_id', 'ctg', 'pos', 'prob'])
+HEADER_LOGITS = '\t'.join(['read_id', 'ctg', 'pos', 'logit'])
 
 
 def parse_gpus(string: str) -> List[int]:
@@ -122,7 +122,6 @@ class Fast5Dataset(IterableDataset):
                            int(self.bases_len * MAX_BLOCKS_LEN_FACTOR),
                            self.batch_size)
 
-        # buffer = mappy.ThreadBuffer()
         buffer = None
         for file in self.files:
             for read in get_reads(file):
@@ -131,7 +130,6 @@ class Fast5Dataset(IterableDataset):
                 except Exception as e:
                     print(f'Cannot load read from file {file}.',
                           file=sys.stderr)
-                    # traceback.print_exc()
                     continue
 
                 try:
@@ -139,11 +137,9 @@ class Fast5Dataset(IterableDataset):
                         read_info, self.ref_positions, self.aligner, buffer,
                         self.window, self.mapq_filter, self.unique_aln)
                 except Exception as e:
-                    print(traceback.format_exc())
                     print(
                         f'Cannot process read {read_info.read_id} from file {file}.',
                         file=sys.stderr)
-                    # traceback.print_exc()
                     continue
 
                 if examples is None:
@@ -215,7 +211,9 @@ def inference(args: argparse.Namespace) -> None:
 
     with ExitStack() as manager:
         output_file = manager.enter_context(open(args.output, 'w'))
-        output_file.write(f'{HEADER}\n')
+
+        header = HEADER_LOGITS if args.logits else HEADER_PROBS
+        output_file.write(f'{header}\n')
 
         manager.enter_context(torch.no_grad())
         pbar = manager.enter_context(tqdm())
