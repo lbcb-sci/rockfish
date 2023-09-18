@@ -12,13 +12,12 @@ import torch
 from torch.nn import DataParallel
 from torch.utils.data import DataLoader, IterableDataset
 
-from rockfish.extract.extract import Example, build_reference_idx2
+from rockfish.extract.extract import (MAX_BLOCKS_LEN_FACTOR,
+                                      MIN_BLOCKS_LEN_FACTOR, Example,
+                                      build_reference_idx2)
 from rockfish.extract.main import *
 from rockfish.model.datasets import *
 from rockfish.model.model import Rockfish
-
-MIN_BLOCKS_LEN_FACTOR = 0.5
-MAX_BLOCKS_LEN_FACTOR = 5
 
 HEADER = '\t'.join(['read_id', 'ctg', 'pos', 'prob'])
 
@@ -136,12 +135,9 @@ class Fast5Dataset(IterableDataset):
                     continue
 
                 try:
-                    _, examples = extract_features(read_info,
-                                                   self.ref_positions,
-                                                   self.aligner, buffer,
-                                                   self.window,
-                                                   self.mapq_filter,
-                                                   self.unique_aln)
+                    _, examples = extract_features(
+                        read_info, self.ref_positions, self.aligner, buffer,
+                        self.window, self.mapq_filter, self.unique_aln)
                 except Exception as e:
                     print(traceback.format_exc())
                     print(
@@ -234,8 +230,7 @@ def inference(args: argparse.Namespace) -> None:
             q_mappings = q_mappings.to(device)
             n_blocks = n_blocks.to(device)
 
-            out = model(signals, r_mappings, q_mappings, bases,
-                        n_blocks)
+            out = model(signals, r_mappings, q_mappings, bases, n_blocks)
             if not args.logits:
                 out = out.sigmoid()
             out = out.cpu().numpy()

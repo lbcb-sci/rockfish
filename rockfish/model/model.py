@@ -35,7 +35,6 @@ class Rockfish(pl.LightningModule):
                  bases_rand_mask_prob: float = 0.10,
                  block_size: int = 5,
                  alpha: float = 0.1,
-                 max_block_multiplier: int = 4,
                  separate_unk_mask: bool = True,
                  track_metrics: bool = True,
                  singleton_weight: float = -1) -> None:
@@ -63,22 +62,13 @@ class Rockfish(pl.LightningModule):
             self.max_codebook_entropy = Rockfish.entropy(
                 torch.tensor([1. / codebook_size] * codebook_size))
 
-        max_signal_blocks = max_block_multiplier * bases_len
         self.signal_pe = SignalPositionalEncoding(features, dropout=pos_dropout)
 
         self.ref_embedding = nn.Embedding(self.mask_cls_label + 1, features)
-        # self.ref_encoding = nn.Linear(6, features)
         self.ref_pe = PositionalEncoding(features, pos_dropout, bases_len)
-        '''self.signal_encoder = SignalEncoder(features, nhead, dim_ff, n_layers,
-                                            attn_dropout)'''
-        encoder_layer = nn.TransformerEncoderLayer(features,
-                                                   nhead,
-                                                   dim_ff,
-                                                   attn_dropout,
-                                                   'gelu',
-                                                   batch_first=True,
-                                                   norm_first=True)
-        self.signal_encoder = nn.TransformerEncoder(encoder_layer, n_layers)
+
+        self.signal_encoder = SignalEncoder(features, nhead, dim_ff, n_layers,
+                                            attn_dropout)
         self.signal_norm = nn.LayerNorm(features)
 
         self.alignment_decoder = AlignmentDecoder(features, nhead, dim_ff,

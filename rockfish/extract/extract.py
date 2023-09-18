@@ -12,8 +12,8 @@ from .fast5 import ReadInfo
 
 MotifPositions = Dict[str, Tuple[Set[int], Set[int]]]
 
-MIN_N_BLOCKS = 16  # OLD VALUE = 31
-MAX_N_BLOCKS = 5 * 31  # OLD VALUE = 4 * 31 = 124
+MIN_BLOCKS_LEN_FACTOR = 0.5
+MAX_BLOCKS_LEN_FACTOR = 5
 
 
 @dataclass
@@ -111,6 +111,9 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
                      aligner: mappy.Aligner, buffer: mappy.ThreadBuffer,
                      window: int, mapq_filter: int,
                      unique_aln: bool) -> Tuple[AlignmentInfo, List[Example]]:
+    min_n_blocks = int(MIN_BLOCKS_LEN_FACTOR * 2 * window + 1)
+    max_n_blocks = int(MAX_BLOCKS_LEN_FACTOR * 2 * window + 1)
+
     seq_to_sig = read_info.get_seq_to_sig()
     signal = read_info.get_normalized_signal(end=seq_to_sig[-1]) \
                         .astype(np.half)
@@ -135,7 +138,7 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         sig_end = seq_to_sig[q_end]
 
         n_blocks = (sig_end - sig_start) // read_info.block_stride
-        if n_blocks < MIN_N_BLOCKS or n_blocks > MAX_N_BLOCKS:
+        if n_blocks < min_n_blocks or n_blocks > max_n_blocks:
             continue
 
         move_start = (sig_start - seq_to_sig[0]) // read_info.block_stride
