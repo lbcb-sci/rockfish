@@ -1,14 +1,12 @@
-from turtle import forward
+import math
+from typing import *
+
 import torch
-from torch.functional import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
 from torch.nn.init import xavier_uniform_
 from torch.nn.utils.rnn import pad_sequence
-
-import math
-
-from typing import *
 
 
 class PositionalEncoding(nn.Module):
@@ -112,7 +110,7 @@ class LinearProjection(nn.Module):
 
 class SignalPositionalEncoding(nn.Module):
 
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 124):
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 256):
         super(SignalPositionalEncoding, self).__init__()
 
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)

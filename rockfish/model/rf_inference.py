@@ -1,18 +1,17 @@
+import argparse
+import fileinput
+import multiprocessing as mp
+import os
+import warnings
+from contextlib import ExitStack
+from typing import *
+
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import os
-import multiprocessing as mp
-import fileinput
-from contextlib import ExitStack
-import warnings
-import argparse
-
 from .datasets import *
 from .model import Rockfish
-
-from typing import *
 
 
 def parse_gpus(string: str) -> List[int]:

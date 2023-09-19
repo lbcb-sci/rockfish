@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import numpy as np
-
-from dataclasses import dataclass
-from struct import Struct
-from io import BufferedReader
 import sys
-
+from dataclasses import dataclass
+from io import BufferedReader
+from struct import Struct
 from typing import *
+
+import numpy as np
 
 
 @dataclass
@@ -64,8 +63,8 @@ class RFExampleHeader:
         return cls(read_id.decode(), ctg_id, pos, n_points, q_indices_len)
 
     def to_bytes(self) -> bytes:
-        return EXAMPLE_HEADER_STRUCT.pack(str.encode(self.read_id),
-                                          self.ctg_id, self.pos, self.n_points,
+        return EXAMPLE_HEADER_STRUCT.pack(str.encode(self.read_id), self.ctg_id,
+                                          self.pos, self.n_points,
                                           self.q_indices_len)
 
     def example_len(self, seq_len: int) -> int:
@@ -94,8 +93,13 @@ class RFExampleData:
     event_lengths: np.ndarray
     bases: str
 
-    def __init__(self, signal: DataArray, q_indices: DataArray,
-                 event_lengths: DataArray, bases: str) -> None:
+    def __init__(
+        self,
+        signal: DataArray,
+        q_indices: DataArray,
+        event_lengths: DataArray,
+        bases: str,
+    ) -> None:
         super().__init__()
 
         self.signal = convert_array(signal, np.half)
@@ -131,17 +135,23 @@ class RFExample:
     data: RFExampleData
 
     @classmethod
-    def from_file(cls, fd: BufferedReader, seq_len: int, offset: Optional[int] = None) -> RFExample:
+    def from_file(cls,
+                  fd: BufferedReader,
+                  seq_len: int,
+                  offset: Optional[int] = None) -> RFExample:
         if offset is not None:
             fd.seek(offset)
 
-        header = RFExampleHeader.parse_bytes(fd.read(EXAMPLE_HEADER_STRUCT.size))
-        data = RFExampleData.parse_bytes(fd.read(header.example_len(seq_len)), header, seq_len)
+        header = RFExampleHeader.parse_bytes(fd.read(
+            EXAMPLE_HEADER_STRUCT.size))
+        data = RFExampleData.parse_bytes(fd.read(header.example_len(seq_len)),
+                                         header, seq_len)
 
         return cls(header, data)
 
 
 class DictLabels:
+
     def __init__(self, path: str) -> None:
         self.label_for_read = {}
         self.label_for_pos = {}
@@ -167,5 +177,7 @@ class DictLabels:
             return self.label_for_read[read_id]
         elif (ctg, pos) in self.label_for_pos:
             return self.label_for_pos[(ctg, pos)]
+        elif (read_id, ctg, pos) in self.label_for_read_pos:
+            return self.label_for_read_pos[(read_id, ctg, pos)]
 
-        return self.label_for_read_pos[(read_id, ctg, pos)]
+        raise KeyError('Label for the given example is not provided')

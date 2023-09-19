@@ -1,27 +1,25 @@
-import torch
-from torch.nn import DataParallel
-from torch.utils.data import IterableDataset, DataLoader
-import mappy
-
-import random
-from pathlib import Path
-from contextlib import ExitStack
-import sys
-import traceback
-import warnings
 import argparse
-
-from rockfish.extract.extract import Example, build_reference_idx2
-from rockfish.extract.main import *
-from rockfish.model.model import Rockfish
-from rockfish.model.datasets import *
-
+import random
+import sys
+import warnings
+from contextlib import ExitStack
+from pathlib import Path
 from typing import *
 
-MIN_BLOCKS_LEN_FACTOR = 1
-MAX_BLOCKS_LEN_FACTOR = 4
+import mappy
+import torch
+from torch.nn import DataParallel
+from torch.utils.data import DataLoader, IterableDataset
 
-HEADER = '\t'.join(['read_id', 'ctg', 'pos', 'prob'])
+from rockfish.extract.extract import (MAX_BLOCKS_LEN_FACTOR,
+                                      MIN_BLOCKS_LEN_FACTOR, Example,
+                                      build_reference_idx2)
+from rockfish.extract.main import *
+from rockfish.model.datasets import *
+from rockfish.model.model import Rockfish
+
+HEADER_PROBS = '\t'.join(['read_id', 'ctg', 'pos', 'prob'])
+HEADER_LOGITS = '\t'.join(['read_id', 'ctg', 'pos', 'logit'])
 
 
 def parse_gpus(string: str) -> List[int]:
@@ -102,7 +100,8 @@ class Fast5Dataset(IterableDataset):
 
     def __init__(self, files: List[Path], ref_positions: MotifPositions,
                  aligner: mappy.Aligner, window: int, mapq_filter: int,
-                 unique_aln: bool, batch_size: int, block_size: int, device: str) -> None:
+                 unique_aln: bool, batch_size: int, block_size: int,
+                 device: str) -> None:
         super().__init__()
 
         self.files = files
@@ -119,11 +118,11 @@ class Fast5Dataset(IterableDataset):
         self.mapping_encodings = ReferenceMapping(self.bases_len, block_size)
 
     def __iter__(self):
-        bins = ExampleBins(self.bases_len * MIN_BLOCKS_LEN_FACTOR,
-                           self.bases_len * MAX_BLOCKS_LEN_FACTOR,
+        bins = ExampleBins(int(self.bases_len * MIN_BLOCKS_LEN_FACTOR),
+                           int(self.bases_len * MAX_BLOCKS_LEN_FACTOR),
                            self.batch_size)
 
-        buffer = mappy.ThreadBuffer()
+        buffer = None
         for file in self.files:
             for read in get_reads(file):
                 try:
@@ -131,7 +130,6 @@ class Fast5Dataset(IterableDataset):
                 except Exception as e:
                     print(f'Cannot load read from file {file}.',
                           file=sys.stderr)
-                    # traceback.print_exc()
                     continue
 
                 try:
@@ -142,7 +140,6 @@ class Fast5Dataset(IterableDataset):
                     print(
                         f'Cannot process read {read_info.read_id} from file {file}.',
                         file=sys.stderr)
-                    # traceback.print_exc()
                     continue
 
                 if examples is None:
@@ -160,9 +157,10 @@ class Fast5Dataset(IterableDataset):
         self, example: Example
     ) -> Tuple[str, str, int, torch.Tensor, torch.Tensor, torch.Tensor,
                torch.Tensor]:
-        signal = torch.tensor(example.signal,
-                              dtype=torch.float if self.device == 'cpu' else torch.half).unfold(-1, self.block_size,
-                                                       self.block_size)
+        signal = torch.tensor(
+            example.signal,
+            dtype=torch.float if self.device == 'cpu' else torch.half).unfold(
+                -1, self.block_size, self.block_size)
         bases = torch.tensor([ENCODING.get(b, 4) for b in example.bases])
         q_indices = torch.tensor(example.q_indices.astype(np.int32))
         lengths = torch.tensor(np.array(example.event_length).astype(np.int32))
@@ -213,7 +211,9 @@ def inference(args: argparse.Namespace) -> None:
 
     with ExitStack() as manager:
         output_file = manager.enter_context(open(args.output, 'w'))
-        output_file.write(f'{HEADER}\n')
+
+        header = HEADER_LOGITS if args.logits else HEADER_PROBS
+        output_file.write(f'{header}\n')
 
         manager.enter_context(torch.no_grad())
         pbar = manager.enter_context(tqdm())
@@ -228,11 +228,13 @@ def inference(args: argparse.Namespace) -> None:
             q_mappings = q_mappings.to(device)
             n_blocks = n_blocks.to(device)
 
-            probs = model(signals, r_mappings, q_mappings, bases,
-                          n_blocks).sigmoid().cpu().numpy()
+            out = model(signals, r_mappings, q_mappings, bases, n_blocks)
+            if not args.logits:
+                out = out.sigmoid()
+            out = out.cpu().numpy()
 
-            for id, ctg, pos, prob in zip(ids, ctgs, positions, probs):
-                print(id, ctg, pos, prob, file=output_file, sep='\t')
+            for id, ctg, pos, o in zip(ids, ctgs, positions, out):
+                print(id, ctg, pos, o, file=output_file, sep='\t')
 
             pbar.update(n=len(positions))
 
@@ -256,6 +258,7 @@ def add_inference_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('-b', '--batch_size', type=int, default=4096)
     # parser.add_argument('--combined_mask', action='store_true')
 
+    parser.add_argument('-l', '--logits', action='store_true')
     parser.add_argument('-o', '--output', type=str, default='predictions.tsv')
 
 

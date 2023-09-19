@@ -1,17 +1,15 @@
-import numpy as np
-import torch
-from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import Dataset, IterableDataset, DataLoader
-
-import pytorch_lightning as pl
-
-from dataclasses import dataclass
-from io import BufferedReader
-import sys
 import math
-
+import sys
 from typing import *
 
+import numpy as np
+import pytorch_lightning as pl
+import torch
+from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import DataLoader, Dataset, IterableDataset
+
+from rockfish.extract.extract import (MAX_BLOCKS_LEN_FACTOR,
+                                      MIN_BLOCKS_LEN_FACTOR)
 from rockfish.rf_format import *
 
 ENCODING = {b: i for i, b in enumerate('ACGTN')}
@@ -121,8 +119,8 @@ class RFInferenceDataset(IterableDataset):
         self.end = len(self.offsets) if end_idx is None else end_idx
 
     def __iter__(self):
-        min_bin_idx = self.ref_len // 10
-        max_bin_idx = (4 * self.ref_len) // 10
+        min_bin_idx = int(MIN_BLOCKS_LEN_FACTOR * self.ref_len) // 10
+        max_bin_idx = int(MAX_BLOCKS_LEN_FACTOR * self.ref_len) // 10
         bins = [list() for _ in range(max_bin_idx - min_bin_idx + 1)]
         stored = 0
 

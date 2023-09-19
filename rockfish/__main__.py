@@ -1,28 +1,24 @@
-import sys
 import argparse
-
+import sys
 from typing import *
 
-from .extract.main import extract as extract_func
-from .extract.main import add_extract_arguments as extract_args
-
-from .model.inference import inference as inference_func
-from .model.inference import add_inference_arguments as inference_args
-
-from .model.rf_inference import main as rf_inference_func
-from .model.rf_inference import add_rf_inference_args as rf_inference_args
-
-from .rftools.index import main as index_func
-from .rftools.index import add_index_arguments as index_args
-
-from .rftools.merge import main as merge_func
-from .rftools.merge import add_merge_arguments as merge_args
-
-from .rftools.convert_labels import main as convert_labels_func
-from .rftools.convert_labels import add_convert_labels_args as convert_labels_args
-
-from .data.download import download as download_func
 from .data.download import add_download_arguments as download_args
+from .data.download import download as download_func
+from .extract.main import add_extract_arguments as extract_args
+from .extract.main import extract as extract_func
+from .model.inference import add_inference_arguments as inference_args
+from .model.inference import inference as inference_func
+from .model.rf_inference import add_rf_inference_args as rf_inference_args
+from .model.rf_inference import main as rf_inference_func
+from .rftools.convert_labels import \
+    add_convert_labels_args as convert_labels_args
+from .rftools.convert_labels import main as convert_labels_func
+from .rftools.index import add_index_arguments as index_args
+from .rftools.index import main as index_func
+from .rftools.merge import add_merge_arguments as merge_args
+from .rftools.merge import main as merge_func
+from .rftools.sample import add_sample_arguments as sample_args
+from .rftools.sample import main as sample_func
 
 
 def get_arguments() -> argparse.Namespace:
@@ -49,6 +45,10 @@ def get_arguments() -> argparse.Namespace:
     merge_parser = subparsers.add_parser('merge')
     merge_parser.set_defaults(func=merge_func)
     merge_args(merge_parser)
+
+    sample_parser = subparsers.add_parser('sample')
+    sample_parser.set_defaults(func=sample_func)
+    sample_args(sample_parser)
 
     convert_labels_parser = subparsers.add_parser('convert_labels')
     convert_labels_parser.set_defaults(func=convert_labels_func)
