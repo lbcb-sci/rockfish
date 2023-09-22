@@ -69,7 +69,7 @@ Python requirements can be found in [setup.cfg](setup.cfg)
 ## Models
 | Model | Encoder layers | Decoder layers | Features | Feedforward | Guppy config              |
 |-------|----------------|----------------|----------|-------------|---------------------------|
-| Base  | 12             | 12             | 256      | 1024        | dna_r9.4.1_450bps_sup.cfg |
+| Base  | 12             | 12             | 384      | 2048        | dna_r9.4.1_450bps_sup.cfg |
 | Small | 6              | 6              | 128      | 1024        | dna_r9.4.1_450bps_sup.cfg |
 
 ## Example
