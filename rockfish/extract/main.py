@@ -1,22 +1,22 @@
+import argparse
+import multiprocessing as mp
+import traceback
+from collections import Counter
+from pathlib import Path
+from typing import *
+
+import mappy
+from importlib_resources import as_file, files
 from ont_fast5_api.fast5_interface import get_fast5_file
 from ont_fast5_api.fast5_read import Fast5Read
 from tqdm import tqdm
-import mappy
-
-from pathlib import Path
-from collections import Counter
-import multiprocessing as mp
-import argparse
-
-from typing import *
 
 from rockfish.rftools.merge import merge
-from .fast5 import load_read
-from .alignment import get_aligner, AlignmentInfo
-from .extract import extract_features, MotifPositions, build_reference_idx2
-from .writer import BinaryWriter
 
-import traceback
+from .alignment import AlignmentInfo, get_aligner
+from .extract import MotifPositions, build_reference_idx2, extract_features
+from .fast5 import load_read
+from .writer import BinaryWriter
 
 
 def get_files(path: Path, recursive: bool = False) -> Iterator[Path]:
@@ -25,11 +25,11 @@ def get_files(path: Path, recursive: bool = False) -> Iterator[Path]:
 
     # Finding all input FAST5 files
     if recursive:
-        files = path.glob('**/*.fast5')
+        fast5_files = path.glob('**/*.fast5')
     else:
-        files = path.glob('*.fast5')
+        fast5_files = path.glob('*.fast5')
 
-    return files
+    return fast5_files
 
 
 def get_reads(path: Path) -> Generator[Fast5Read, None, None]:
@@ -74,12 +74,12 @@ def process_worker(aligner: mappy.Aligner, ref_positions: MotifPositions,
 def extract(args: argparse.Namespace) -> None:
     tqdm.write(
         f'Retrieving files from {args.source}, recursive {args.recursive}')
-    files = list(get_files(args.source, args.recursive))
+    fast5_files = list(get_files(args.source, args.recursive))
 
     in_queue = mp.Queue()
-    n_workers = min(args.workers, len(files))
+    n_workers = min(args.workers, len(fast5_files))
 
-    for p in files:
+    for p in fast5_files:
         in_queue.put(p)
     for _ in range(n_workers):
         in_queue.put(None)
@@ -106,9 +106,9 @@ def extract(args: argparse.Namespace) -> None:
 
     tqdm.write('Processing started.')
 
-    pbar = tqdm(total=len(files))
+    pbar = tqdm(total=len(fast5_files))
     status_count = Counter({e.name: 0 for e in AlignmentInfo})
-    while pbar.n < len(files):
+    while pbar.n < len(fast5_files):
         status = out_queue.get()
         status_count += status
 

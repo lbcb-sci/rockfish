@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from tqdm import tqdm
-
+import argparse
 import sys
+from dataclasses import dataclass
 from io import BufferedReader
 from pathlib import Path
-from dataclasses import dataclass
-import argparse
+from typing import *
+
+from tqdm import tqdm
 
 from rockfish.rf_format import *
-
-from typing import *
 
 
 @dataclass
@@ -76,15 +75,17 @@ def index(rf_path: Path, index_path: Optional[Path], seq_len: int) -> None:
                 total = EXAMPLE_HEADER_STRUCT.size + data_bytes_len
                 index_fd.write(total.to_bytes(2, sys.byteorder))
 
+            # assert EOF
+            if data.read():
+                tqdm.write(f'ERROR: {rf_path} EOF expected but data was read.')
+                sys.exit(1)
+
     tqdm.write(f'Finished index generation.')
 
 
 def add_index_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('data_path', type=Path)
-    parser.add_argument('-i',
-                        '--index_path',
-                        type=Optional[Path],
-                        default=None)
+    parser.add_argument('-i', '--index_path', type=Optional[Path], default=None)
     parser.add_argument('-s', '--seq_len', type=int, default=31)
 
 
