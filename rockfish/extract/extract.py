@@ -1,20 +1,21 @@
+import numpy as np
+import mappy
+
 import multiprocessing as mp
-import re
 from dataclasses import dataclass
 from functools import partial
+import re
+
 from typing import *
 
-import mappy
-import numpy as np
-
-from .alignment import AlignmentData, AlignmentInfo, align_read
 from .fast5 import ReadInfo
+from .pod5 import  BamIndex, PodReadInfo
+from .alignment import AlignmentData, AlignmentInfo, align_read
 
 MotifPositions = Dict[str, Tuple[Set[int], Set[int]]]
 
 MIN_BLOCKS_LEN_FACTOR = 0.5
 MAX_BLOCKS_LEN_FACTOR = 5
-
 
 @dataclass
 class Example:
@@ -111,13 +112,11 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
                      aligner: mappy.Aligner, buffer: mappy.ThreadBuffer,
                      window: int, mapq_filter: int,
                      unique_aln: bool) -> Tuple[AlignmentInfo, List[Example]]:
-    min_n_blocks = int(MIN_BLOCKS_LEN_FACTOR * 2 * window + 1)
-    max_n_blocks = int(MAX_BLOCKS_LEN_FACTOR * 2 * window + 1)
-
     seq_to_sig = read_info.get_seq_to_sig()
     signal = read_info.get_normalized_signal(end=seq_to_sig[-1]) \
                         .astype(np.half)
     query, _ = read_info.get_seq_and_quals()
+    example_bases = (2 * window) + 1
 
     status, aln_data = align_read(query, aligner, buffer, mapq_filter,
                                   unique_aln, read_info.read_id)
@@ -138,27 +137,35 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         sig_end = seq_to_sig[q_end]
 
         n_blocks = (sig_end - sig_start) // read_info.block_stride
-        if n_blocks < min_n_blocks or n_blocks > max_n_blocks:
+        if n_blocks < example_bases or n_blocks > 4 * example_bases:
             continue
 
         move_start = (sig_start - seq_to_sig[0]) // read_info.block_stride
         move_end = (sig_end - seq_to_sig[0]) // read_info.block_stride
         q_indices = read_info.move_table[move_start:move_end].cumsum() - 1
 
-        event_lengths = [
+        event_lengts = [
             get_event_length(p, aln_data.ref_to_query, seq_to_sig)
             for p in range(rel - window, rel + window + 1)
         ]
 
-        example = Example(
-            read_info.read_id,
-            aln_data.ctg,
-            pos,
-            signal[sig_start:sig_end],
-            event_lengths,
-            ref_seq[rel - window:rel + window + 1],
-            q_indices,
-        )
+        example = Example(read_info.read_id, aln_data.ctg, pos,
+                          signal[sig_start:sig_end], event_lengts,
+                          ref_seq[rel - window:rel + window + 1], q_indices)
         examples.append(example)
 
     return status, examples
+
+
+def extract_pod5_features(read_info: PodReadInfo, bamidx: BamIndex, ref_positions: MotifPositions,
+                     aligner: mappy.Aligner, buffer: mappy.ThreadBuffer,
+                     window: int, mapq_filter: int,
+                     unique_aln: bool) -> Tuple[AlignmentInfo, List[Example]]:
+
+    if not bamidx.aligned:
+        for bam_data in bamidx.get_alignment(read_info.read_id):
+            read_info.update_from_bam(bam_data)
+            status, examples = extract_features(read_info=read_info, ref_positions=ref_positions, aligner=aligner,
+                                            buffer=buffer, window=window, mapq_filter=mapq_filter,
+                                            unique_aln=unique_aln)
+            yield status, examples

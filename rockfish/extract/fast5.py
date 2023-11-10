@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from collections import defaultdict
-from dataclasses import dataclass
-from pathlib import Path
-from typing import *
-
-import numpy as np
 from ont_fast5_api.fast5_read import Fast5Read
+
+from dataclasses import dataclass
+import numpy as np
+
+from typing import *
 
 FASTQ_PATH = 'BaseCalled_template/Fastq'
 MOVE_TABLE_PATH = 'BaseCalled_template/Move'
@@ -21,7 +20,8 @@ class ReadInfo:
     block_stride: int
 
     def get_seq_to_sig(self) -> np.ndarray:
-        move_table = np.append(self.move_table, 1)  # Adding for easier indexing
+        move_table = np.append(self.move_table,
+                               1)  # Adding for easier indexing
         return move_table.nonzero()[0] * self.block_stride
 
     def get_seq_and_quals(self) -> Tuple[str, np.np.ndarray]:
