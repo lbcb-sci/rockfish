@@ -1,14 +1,13 @@
+import os
 from typing import *
 
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import wandb
-from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.utilities.cli import (LightningArgumentParser,
-                                             LightningCLI)
+from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.cli import LightningCLI
+from lightning.pytorch.loggers import WandbLogger
 from torchmetrics import Accuracy, F1Score, Precision, Recall, Specificity
 from torchmetrics.functional import accuracy as acc
 
@@ -116,7 +115,7 @@ class Rockfish(pl.LightningModule):
 
         signal_mask = self.create_padding_mask(num_blocks, S)  # BxS_out
 
-        signal = self.signal_encoder(signal, src_key_padding_mask=signal_mask)
+        signal = self.signal_encoder(signal, signal_mask)
         signal = self.signal_norm(signal)
 
         bases = self.ref_embedding(bases)
@@ -146,7 +145,7 @@ class Rockfish(pl.LightningModule):
 
         signal = self.signal_pe(signal, r_pos_enc, q_pos_enc, masks)
 
-        signal = self.signal_encoder(signal, src_key_padding_mask=signal_mask)
+        signal = self.signal_encoder(signal, signal_mask)
         signal = self.signal_norm(signal)
 
         bases = self.ref_embedding(bases)
@@ -172,12 +171,9 @@ class Rockfish(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(),
                                       self.hparams.lr,
-                                      weight_decay=self.hparams.wd,
-                                      eps=1e-6)
+                                      weight_decay=self.hparams.wd)
+        
         return optimizer
-
-    def optimizer_zero_grad(self, epoch, batch_idx, optimizer, optimizer_idx):
-        optimizer.zero_grad(set_to_none=True)
 
     @staticmethod
     def entropy(probs):
@@ -233,7 +229,7 @@ class Rockfish(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, singletons = batch
         targets = (labels > 0.5).int()
-
+        
         bases_mask = None
         if self.bases_mask_task:
             bases, bases_mask, target_bases = self.bases_masking(bases)
@@ -249,7 +245,7 @@ class Rockfish(pl.LightningModule):
         mod_loss = self.ce_loss(mod_logits, labels, singletons)
 
         loss = mod_loss
-        self.log('train_mod_loss', mod_loss)
+        self.log('train_mod_loss', mod_loss, prog_bar=True)
 
         mod_acc = acc(mod_logits, targets, task='binary')
         self.log('train_mod_acc', mod_acc)
@@ -288,7 +284,7 @@ class Rockfish(pl.LightningModule):
 
         logits = self(signals, r_pos_enc, q_pos_enc, bases, num_blocks)
         loss = self.ce_loss(logits, labels, singletons)
-        self.log('val_loss', loss, prog_bar=True)
+        self.log('val_loss', loss, prog_bar=True, sync_dist=True)
 
         self.val_acc(logits, targets)
         self.log('val_acc', self.val_acc, prog_bar=True)
@@ -323,7 +319,7 @@ def get_trainer_defaults() -> Dict[str, Any]:
 
     wandb = WandbLogger(project='dna-mod-revision',
                         log_model=True,
-                        save_dir='wandb')
+                        save_dir=os.getcwd())
     trainer_defaults['logger'] = wandb
 
     return trainer_defaults
@@ -331,15 +327,15 @@ def get_trainer_defaults() -> Dict[str, Any]:
 
 class RockfishLightningCLI(LightningCLI):
 
-    def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
+    def add_arguments_to_parser(self, parser) -> None:
         parser.link_arguments('model.bases_len', 'data.ref_len')
         parser.link_arguments('model.block_size', 'data.block_size')
 
 
 def cli_main():
-    RockfishLightningCLI(Rockfish,
+    cli = RockfishLightningCLI(Rockfish,
                          RFDataModule,
-                         save_config_overwrite=True,
+                         save_config_kwargs={"overwrite": True},
                          trainer_defaults=get_trainer_defaults())
 
 
