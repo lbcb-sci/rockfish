@@ -1,4 +1,6 @@
+import math
 import os
+from functools import partial
 from typing import *
 
 import lightning.pytorch as pl
@@ -8,6 +10,7 @@ import torch.nn.functional as F
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.utilities import grad_norm
 from torchmetrics import Accuracy, F1Score, Precision, Recall, Specificity
 from torchmetrics.functional import accuracy as acc
 
@@ -173,6 +176,17 @@ class Rockfish(pl.LightningModule):
                                       self.hparams.lr,
                                       weight_decay=self.hparams.wd)
         
+        scheduler_config = {
+            'scheduler':
+                get_cosine_schedule_with_warmup(
+                    optimizer, 0,
+                    self.trainer.estimated_stepping_batches),
+            'interval':
+                'step'
+        }
+
+        return {'optimizer': optimizer, 'lr_scheduler': scheduler_config}
+        
         return optimizer
 
     @staticmethod
@@ -307,6 +321,12 @@ class Rockfish(pl.LightningModule):
         self.f1(logits, targets)
         self.log('f1-score', self.f1)
 
+    def on_before_optimizer_step(self, *args, **kwargs):
+        # Compute the 2-norm for each layer
+        # If using mixed precision, the gradients are already unscaled here
+        norms = grad_norm(self, norm_type=2)
+        self.log_dict(norms)
+
 
 def get_trainer_defaults() -> Dict[str, Any]:
     trainer_defaults = {}
@@ -341,3 +361,46 @@ def cli_main():
 
 if __name__ == '__main__':
     cli_main()
+
+
+def _get_cosine_schedule_with_warmup_lr_lambda(
+    current_step: int, *, num_warmup_steps: int, num_training_steps: int, num_cycles: float
+):
+    if current_step < num_warmup_steps:
+        return float(current_step) / float(max(1, num_warmup_steps))
+    progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
+    return max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
+
+
+def get_cosine_schedule_with_warmup(
+    optimizer: torch.optim.Optimizer, num_warmup_steps: int, num_training_steps: int, num_cycles: float = 0.5, last_epoch: int = -1
+):
+    """
+    Create a schedule with a learning rate that decreases following the values of the cosine function between the
+    initial lr set in the optimizer to 0, after a warmup period during which it increases linearly between 0 and the
+    initial lr set in the optimizer.
+
+    Args:
+        optimizer ([`~torch.optim.Optimizer`]):
+            The optimizer for which to schedule the learning rate.
+        num_warmup_steps (`int`):
+            The number of steps for the warmup phase.
+        num_training_steps (`int`):
+            The total number of training steps.
+        num_cycles (`float`, *optional*, defaults to 0.5):
+            The number of waves in the cosine schedule (the defaults is to just decrease from the max value to 0
+            following a half-cosine).
+        last_epoch (`int`, *optional*, defaults to -1):
+            The index of the last epoch when resuming training.
+
+    Return:
+        `torch.optim.lr_scheduler.LambdaLR` with the appropriate schedule.
+    """
+
+    lr_lambda = partial(
+        _get_cosine_schedule_with_warmup_lr_lambda,
+        num_warmup_steps=num_warmup_steps,
+        num_training_steps=num_training_steps,
+        num_cycles=num_cycles,
+    )
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)
