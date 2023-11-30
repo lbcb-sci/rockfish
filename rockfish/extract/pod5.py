@@ -18,7 +18,6 @@ from typing import *
 @dataclass
 class BamIndex:
     bampath: str
-    only_primary: bool = True
 
     def __post_init__(self):
         self.bam_f = None
@@ -47,15 +46,8 @@ class BamIndex:
                 tqdm.write('Finished reading bam file')
                 break
             read_id = read.query_name
-            if self.only_primary and ((read.is_supplementary or read.is_secondary) or read_id in self.bam_idx):
-                continue
             self.num_recs += 1
             self.bam_idx[read_id].append(read_ptr)
-            try:
-                align_tag = read.get_tag('MD')
-                self.aligned = True
-            except KeyError:
-                continue
         self.close_bam()
         self.bam_idx = dict(self.bam_idx)
         self.num_reads = len(self.bam_idx)
@@ -94,8 +86,8 @@ class PodReadInfo:
         self.block_stride = 0
 
     def update_from_bam(self, bam_data):
-        self.fastq = bam_data.query
-        self.quals = bam_data.qual
+        self.fastq = bam_data.get_forward_sequence()
+        self.quals = bam_data.get_forward_qualities()
         mv_data = bam_data.get_tag('mv')
         self.block_stride = mv_data.pop(0)
         self.move_table = np.array(mv_data)
@@ -107,9 +99,7 @@ class PodReadInfo:
         return np.array(self.scale * (self.signal + self.offset), dtype=np.float32)
 
     def get_seq_and_quals(self) -> Tuple[str, np.ndarray]:
-        quals = np.array([ord(c) - 33 for c in self.quals], dtype=np.uint8)
-
-        return self.fastq, quals
+        return self.fastq, self.quals
 
     def get_seq_to_sig(self) -> np.ndarray:
         move_table = np.append(self.move_table,
@@ -135,17 +125,17 @@ def load_pod5_read(read: ReadRecord) -> PodReadInfo:
 
 def load_signals(pod5_file: Path, read_ids: List[str]) -> Generator[ReadRecord, None, None]:
     with p5.Reader(path=pod5_file) as reader:
-        yield from reader.reads(selection=read_ids, preload={'samples'})
+        yield from reader.reads(selection=read_ids)
 
 
 def match_pod5_and_bam(args: argparse.Namespace, files: List[Path]):
-    bam_idx = BamIndex(bampath=args.bam_path, only_primary=True)
+    bam_idx = BamIndex(bampath=args.bam_path)
     tqdm.write(f'Bam indexed with {bam_idx.num_reads} reads')
     pod5_file_readid_pairs = []
     for f in files:
         with p5.Reader(f) as pod5_f:
             read_ids = get_readid_overlaps(bam_idx, pod5_f.read_ids)
-            tqdm.write(f'Extracted {len(read_ids)} overlapping reads from {f} and BAM index')
+            #tqdm.write(f'Extracted {len(read_ids)} overlapping reads from {f} and BAM index')
             pod5_file_readid_pairs.append((f, read_ids))
 
     return bam_idx, pod5_file_readid_pairs

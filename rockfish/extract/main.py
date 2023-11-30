@@ -112,8 +112,6 @@ def process_pod5_worker(bamidx: BamIndex, aligner: mappy.Aligner, ref_positions:
         writer.write_n_examples()
 
 
-
-
 def extract_fast5(args: argparse.Namespace, files: List[Path]) -> None:
     in_queue = mp.Queue()
     n_workers = min(args.workers, len(files))

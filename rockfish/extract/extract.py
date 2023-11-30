@@ -162,10 +162,9 @@ def extract_pod5_features(read_info: PodReadInfo, bamidx: BamIndex, ref_position
                      window: int, mapq_filter: int,
                      unique_aln: bool) -> Tuple[AlignmentInfo, List[Example]]:
 
-    if not bamidx.aligned:
-        for bam_data in bamidx.get_alignment(read_info.read_id):
-            read_info.update_from_bam(bam_data)
-            status, examples = extract_features(read_info=read_info, ref_positions=ref_positions, aligner=aligner,
-                                            buffer=buffer, window=window, mapq_filter=mapq_filter,
-                                            unique_aln=unique_aln)
-            yield status, examples
+    for bam_data in bamidx.get_alignment(read_info.read_id):
+        read_info.update_from_bam(bam_data)
+        status, examples = extract_features(read_info=read_info, ref_positions=ref_positions, aligner=aligner,
+                                        buffer=buffer, window=window, mapq_filter=mapq_filter,
+                                        unique_aln=unique_aln)
+        yield status, examples
