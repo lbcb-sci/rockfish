@@ -113,8 +113,11 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
                      window: int, mapq_filter: int,
                      unique_aln: bool) -> Tuple[AlignmentInfo, List[Example]]:
     seq_to_sig = read_info.get_seq_to_sig()
-    signal = read_info.get_normalized_signal(end=seq_to_sig[-1]) \
+    try:
+        signal = read_info.get_normalized_signal(end=seq_to_sig[-1]) \
                         .astype(np.half)
+    except FloatingPointError:
+        return None, None
     query, _ = read_info.get_seq_and_quals()
     example_bases = (2 * window) + 1
 

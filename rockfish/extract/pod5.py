@@ -15,6 +15,8 @@ from .fast5 import ReadInfo
 
 from typing import *
 
+np.seterr(divide='raise')
+
 @dataclass
 class BamIndex:
     bampath: str

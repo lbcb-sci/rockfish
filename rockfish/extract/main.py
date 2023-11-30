@@ -100,7 +100,8 @@ def process_pod5_worker(bamidx: BamIndex, aligner: mappy.Aligner, ref_positions:
                         if examples is not None:
                             writer.write_examples(examples)
 
-                        status_count[status.name] += 1
+                        if status is not None:
+                            status_count[status.name] += 1
                 except:
                     tqdm.write(
                         f'Exception occured for read: {read_info.read_id} in file {path}'
