@@ -48,7 +48,7 @@ class BamIndex:
                 tqdm.write('Finished reading bam file')
                 break
             read_id = read.query_name
-            if read.is_supplementary or read.is_secondary or read.read_id in self.bam_idx:
+            if read.is_supplementary or read.is_secondary or read_id in self.bam_idx:
                 continue
             self.num_recs += 1
             self.bam_idx[read_id].append(read_ptr)
