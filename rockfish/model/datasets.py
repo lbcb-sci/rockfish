@@ -66,7 +66,7 @@ class RFTrainDataset(Dataset):
         # self.labels = Labels(labels)
         self.labels = np.fromfile(labels, dtype=np.half)
 
-        self.reference_mapping = ReferenceMapping(self.ref_len, block_size)
+        # self.reference_mapping = ReferenceMapping(self.ref_len, block_size)
 
     def __len__(self):
         return len(self.offsets)
@@ -78,10 +78,10 @@ class RFTrainDataset(Dataset):
             -1, self.block_size, self.block_size)  # Converting to blocks
 
         bases = torch.tensor([ENCODING.get(b, 4) for b in example.data.bases])
-        lengths = torch.tensor(example.data.event_lengths.astype(np.int32))
+        # lengths = torch.tensor(example.data.event_lengths.astype(np.int32))
 
-        ref_mapping = self.reference_mapping(lengths)
-        q_indices = torch.tensor(example.data.q_indices.astype(np.int32))
+        # ref_mapping = self.reference_mapping(lengths)
+        # q_indices = torch.tensor(example.data.q_indices.astype(np.int32))
 
         #label = self.labels.get_label(example.read_id, self.ctgs[example.ctg],
         #                              example.pos)
@@ -89,7 +89,7 @@ class RFTrainDataset(Dataset):
 
         singleton = True if example.data.bases.count('CG') == 1 else False
 
-        return signal, ref_mapping, q_indices, bases, label, singleton
+        return signal, bases, label, singleton
 
 
 class RFInferenceDataset(IterableDataset):
@@ -181,15 +181,15 @@ class RFInferenceDataset(IterableDataset):
 
 
 def collate_fn_train(batch):
-    signals, ref_mapping, q_pos_enc, bases, labels, singleton = zip(*batch)
+    signals, bases, labels, singleton = zip(*batch)
 
     num_blocks = torch.tensor([len(s) for s in signals])  # B
     signals = pad_sequence(signals,
                            batch_first=True)  # [B, MAX_LEN, BLOCK_SIZE]
-    ref_mapping = pad_sequence(ref_mapping, batch_first=True)  # [B, MAX_LEN]
-    q_pos_enc = pad_sequence(q_pos_enc, batch_first=True)  # [B, MAX_LEN]
+    # ref_mapping = pad_sequence(ref_mapping, batch_first=True)  # [B, MAX_LEN]
+    # q_pos_enc = pad_sequence(q_pos_enc, batch_first=True)  # [B, MAX_LEN]
 
-    return signals, ref_mapping, q_pos_enc, torch.stack(
+    return signals, torch.stack(
         bases, 0), num_blocks, torch.tensor(labels), torch.tensor(singleton)
 
 

@@ -68,7 +68,7 @@ class RFExampleHeader:
                                           self.q_indices_len)
 
     def example_len(self, seq_len: int) -> int:
-        return 2 * self.n_points + 2 * self.q_indices_len + 3 * seq_len
+        return 2 * self.n_points + 2 * self.q_indices_len + 1 * seq_len
 
 
 DataArray = Union[List, np.ndarray]
@@ -90,21 +90,18 @@ def convert_array(data: DataArray, dtype: np.dtype) -> np.ndarray:
 class RFExampleData:
     signal: np.ndarray
     q_indices: np.ndarray
-    event_lengths: np.ndarray
     bases: str
 
     def __init__(
         self,
         signal: DataArray,
         q_indices: DataArray,
-        event_lengths: DataArray,
         bases: str,
     ) -> None:
         super().__init__()
 
         self.signal = convert_array(signal, np.half)
         self.q_indices = convert_array(q_indices, np.ushort)
-        self.event_lengths = convert_array(event_lengths, np.ushort)
         self.bases = bases
 
     @classmethod
@@ -116,17 +113,17 @@ class RFExampleData:
         start, end = end, end + 2 * header.q_indices_len
         q_indices = np.frombuffer(data[start:end], np.ushort)
 
-        start, end = end, end + 2 * seq_len
-        event_lengths = np.frombuffer(data[start:end], np.ushort)
+        # start, end = end, end + 2 * seq_len
+        # event_lengths = np.frombuffer(data[start:end], np.ushort)
 
         start, end = end, end + seq_len
         bases = data[start:end].decode()
 
-        return cls(signal, q_indices, event_lengths, bases)
+        return cls(signal, q_indices, bases)
 
     def to_bytes(self) -> bytes:
         return self.signal.tobytes() + self.q_indices.tobytes(
-        ) + self.event_lengths.tobytes() + str.encode(self.bases)
+        )  + str.encode(self.bases)
 
 
 @dataclass

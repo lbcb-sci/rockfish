@@ -19,6 +19,49 @@ from .layers import (AlignmentDecoder, PositionalEncoding, SignalEncoder,
                      SignalPositionalEncoding)
 
 
+def _get_cosine_schedule_with_warmup_lr_lambda(
+    current_step: int, *, num_warmup_steps: int, num_training_steps: int, num_cycles: float
+):
+    if current_step < num_warmup_steps:
+        return float(current_step) / float(max(1, num_warmup_steps))
+    progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
+    return max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
+
+
+def get_cosine_schedule_with_warmup(
+    optimizer: torch.optim.Optimizer, num_warmup_steps: int, num_training_steps: int, num_cycles: float = 0.5, last_epoch: int = -1
+):
+    """
+    Create a schedule with a learning rate that decreases following the values of the cosine function between the
+    initial lr set in the optimizer to 0, after a warmup period during which it increases linearly between 0 and the
+    initial lr set in the optimizer.
+
+    Args:
+        optimizer ([`~torch.optim.Optimizer`]):
+            The optimizer for which to schedule the learning rate.
+        num_warmup_steps (`int`):
+            The number of steps for the warmup phase.
+        num_training_steps (`int`):
+            The total number of training steps.
+        num_cycles (`float`, *optional*, defaults to 0.5):
+            The number of waves in the cosine schedule (the defaults is to just decrease from the max value to 0
+            following a half-cosine).
+        last_epoch (`int`, *optional*, defaults to -1):
+            The index of the last epoch when resuming training.
+
+    Return:
+        `torch.optim.lr_scheduler.LambdaLR` with the appropriate schedule.
+    """
+
+    lr_lambda = partial(
+        _get_cosine_schedule_with_warmup_lr_lambda,
+        num_warmup_steps=num_warmup_steps,
+        num_training_steps=num_training_steps,
+        num_cycles=num_cycles,
+    )
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)
+
+
 class Rockfish(pl.LightningModule):
 
     def __init__(self,
@@ -64,7 +107,8 @@ class Rockfish(pl.LightningModule):
             self.max_codebook_entropy = Rockfish.entropy(
                 torch.tensor([1. / codebook_size] * codebook_size))
 
-        self.signal_pe = SignalPositionalEncoding(features, dropout=pos_dropout)
+        #self.signal_pe = SignalPositionalEncoding(features, dropout=pos_dropout)
+        self.signal_pe = PositionalEncoding(features, pos_dropout, 256)
 
         self.ref_embedding = nn.Embedding(self.mask_cls_label + 1, features)
         self.ref_pe = PositionalEncoding(features, pos_dropout, bases_len)
@@ -110,11 +154,11 @@ class Rockfish(pl.LightningModule):
     def get_context_code_probs(self, signal, masks):
         return self.codebook(signal[masks])
 
-    def forward(self, signal, r_pos_enc, q_pos_enc, bases, num_blocks):
+    def forward(self, signal, bases, num_blocks):
         B, S, _ = signal.shape
 
         signal = self.signal_embedding(signal)  # BxSxE
-        signal = self.signal_pe(signal, r_pos_enc, q_pos_enc)
+        signal = self.signal_pe(signal)
 
         signal_mask = self.create_padding_mask(num_blocks, S)  # BxS_out
 
@@ -131,8 +175,6 @@ class Rockfish(pl.LightningModule):
 
     def forward_train(self,
                       signal,
-                      r_pos_enc,
-                      q_pos_enc,
                       bases,
                       num_blocks,
                       bases_mask=None):
@@ -146,7 +188,7 @@ class Rockfish(pl.LightningModule):
         if self.signal_mask_task:
             signal_code_logits, masks = self.mask_signal(signal, signal_mask)
 
-        signal = self.signal_pe(signal, r_pos_enc, q_pos_enc, masks)
+        signal = self.signal_pe(signal)
 
         signal = self.signal_encoder(signal, signal_mask)
         signal = self.signal_norm(signal)
@@ -241,7 +283,7 @@ class Rockfish(pl.LightningModule):
                                                   weight=loss_weights)
 
     def training_step(self, batch, batch_idx):
-        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, singletons = batch
+        signals, bases, num_blocks, labels, singletons = batch
         targets = (labels > 0.5).int()
         
         bases_mask = None
@@ -250,8 +292,6 @@ class Rockfish(pl.LightningModule):
 
         mod_logits, mask_logits, signal_code_logits, context_code_logits = self.forward_train(
             signals,
-            r_pos_enc,
-            q_pos_enc,
             bases,
             num_blocks,
             bases_mask=bases_mask)
@@ -293,10 +333,10 @@ class Rockfish(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        signals, r_pos_enc, q_pos_enc, bases, num_blocks, labels, singletons = batch
+        signals, bases, num_blocks, labels, singletons = batch
         targets = (labels > 0.5).int()
 
-        logits = self(signals, r_pos_enc, q_pos_enc, bases, num_blocks)
+        logits = self(signals, bases, num_blocks)
         loss = self.ce_loss(logits, labels, singletons)
         self.log('val_loss', loss, prog_bar=True, sync_dist=True)
 
@@ -361,46 +401,3 @@ def cli_main():
 
 if __name__ == '__main__':
     cli_main()
-
-
-def _get_cosine_schedule_with_warmup_lr_lambda(
-    current_step: int, *, num_warmup_steps: int, num_training_steps: int, num_cycles: float
-):
-    if current_step < num_warmup_steps:
-        return float(current_step) / float(max(1, num_warmup_steps))
-    progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
-    return max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
-
-
-def get_cosine_schedule_with_warmup(
-    optimizer: torch.optim.Optimizer, num_warmup_steps: int, num_training_steps: int, num_cycles: float = 0.5, last_epoch: int = -1
-):
-    """
-    Create a schedule with a learning rate that decreases following the values of the cosine function between the
-    initial lr set in the optimizer to 0, after a warmup period during which it increases linearly between 0 and the
-    initial lr set in the optimizer.
-
-    Args:
-        optimizer ([`~torch.optim.Optimizer`]):
-            The optimizer for which to schedule the learning rate.
-        num_warmup_steps (`int`):
-            The number of steps for the warmup phase.
-        num_training_steps (`int`):
-            The total number of training steps.
-        num_cycles (`float`, *optional*, defaults to 0.5):
-            The number of waves in the cosine schedule (the defaults is to just decrease from the max value to 0
-            following a half-cosine).
-        last_epoch (`int`, *optional*, defaults to -1):
-            The index of the last epoch when resuming training.
-
-    Return:
-        `torch.optim.lr_scheduler.LambdaLR` with the appropriate schedule.
-    """
-
-    lr_lambda = partial(
-        _get_cosine_schedule_with_warmup_lr_lambda,
-        num_warmup_steps=num_warmup_steps,
-        num_training_steps=num_training_steps,
-        num_cycles=num_cycles,
-    )
-    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)
