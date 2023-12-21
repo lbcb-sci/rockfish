@@ -13,6 +13,10 @@ from tqdm import tqdm
 from .datasets import *
 from .model import Rockfish
 
+#torch.backends.cuda.enable_mem_efficient_sdp(False)
+#torch.backends.cuda.enable_flash_sdp(False)
+#torch.backends.cuda.enable_math_sdp(True)
+
 
 def parse_gpus(string: str) -> List[int]:
     if string is None:
@@ -52,18 +56,15 @@ def inference_worker(args: argparse.Namespace, gpu: Optional[int],
         if gpu is not None:
             manager.enter_context(torch.cuda.amp.autocast())
 
-        for ids, ctgs, positions, signals, bases, r_mappings, q_mappings, n_blocks in loader:
+        for ids, positions, signals, bases, n_blocks in loader:
             signals = signals.to(device)
             bases = bases.to(device)
-            r_mappings = r_mappings.to(device)
-            q_mappings = q_mappings.to(device)
             n_blocks = n_blocks.to(device)
 
-            logits = model(signals, r_mappings, q_mappings, bases,
-                           n_blocks).cpu().numpy()
+            logits = model(signals, bases, n_blocks).cpu().numpy()
 
-            for id, ctg, pos, logit in zip(ids, ctgs, positions, logits):
-                print(id, ctg, pos, logit, file=output_file, sep='\t')
+            for id, pos, logit in zip(ids, positions, logits):
+                print(id, pos, logit, file=output_file, sep='\t')
             out_queue.put(len(positions))  # Notify tqdm
 
 
