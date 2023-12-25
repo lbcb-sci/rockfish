@@ -7,7 +7,7 @@ import lightning.pytorch as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.utilities import grad_norm
@@ -19,18 +19,24 @@ from .layers import (AlignmentDecoder, PositionalEncoding, SignalEncoder,
                      SignalPositionalEncoding)
 
 
-def _get_cosine_schedule_with_warmup_lr_lambda(
-    current_step: int, *, num_warmup_steps: int, num_training_steps: int, num_cycles: float
-):
+def _get_cosine_schedule_with_warmup_lr_lambda(current_step: int, *,
+                                               num_warmup_steps: int,
+                                               num_training_steps: int,
+                                               num_cycles: float):
     if current_step < num_warmup_steps:
         return float(current_step) / float(max(1, num_warmup_steps))
-    progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
-    return max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
+    progress = float(current_step - num_warmup_steps) / float(
+        max(1, num_training_steps - num_warmup_steps))
+    return max(
+        0.0,
+        0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
 
 
-def get_cosine_schedule_with_warmup(
-    optimizer: torch.optim.Optimizer, num_warmup_steps: int, num_training_steps: int, num_cycles: float = 0.5, last_epoch: int = -1
-):
+def get_cosine_schedule_with_warmup(optimizer: torch.optim.Optimizer,
+                                    num_warmup_steps: int,
+                                    num_training_steps: int,
+                                    num_cycles: float = 0.5,
+                                    last_epoch: int = -1):
     """
     Create a schedule with a learning rate that decreases following the values of the cosine function between the
     initial lr set in the optimizer to 0, after a warmup period during which it increases linearly between 0 and the
@@ -117,8 +123,12 @@ class Rockfish(pl.LightningModule):
                                             attn_dropout)
         self.signal_norm = nn.LayerNorm(features)
 
-        self.alignment_decoder = AlignmentDecoder(features, nhead, dim_ff,
-                                                  n_layers, attn_dropout)
+        self.alignment_decoder = AlignmentDecoder(features,
+                                                  nhead,
+                                                  dim_ff,
+                                                  n_layers,
+                                                  bases_len,
+                                                  dropout=attn_dropout)
         self.bases_norm = nn.LayerNorm(features)
 
         self.fc_mod = nn.Linear(features, 1)
@@ -139,7 +149,7 @@ class Rockfish(pl.LightningModule):
         repeats = torch.arange(0, blocks_len, device=num_blocks.device)  # S
         repeats = repeats.expand(num_blocks.size(0), -1)  # BxS
 
-        return repeats >= num_blocks.unsqueeze(-1)
+        return repeats < num_blocks.unsqueeze(-1)
 
     def mask_signal(self, signal, padding_mask):
         mask = torch.rand(*signal.shape[:2],
@@ -173,11 +183,7 @@ class Rockfish(pl.LightningModule):
 
         return self.fc_mod(x).squeeze(-1)  # BxE -> B
 
-    def forward_train(self,
-                      signal,
-                      bases,
-                      num_blocks,
-                      bases_mask=None):
+    def forward_train(self, signal, bases, num_blocks, bases_mask=None):
         B, S, _ = signal.shape
 
         signal = self.signal_embedding(signal)  # BxSxE
@@ -217,18 +223,17 @@ class Rockfish(pl.LightningModule):
         optimizer = torch.optim.AdamW(self.parameters(),
                                       self.hparams.lr,
                                       weight_decay=self.hparams.wd)
-        
+
         scheduler_config = {
             'scheduler':
-                get_cosine_schedule_with_warmup(
-                    optimizer, 0,
-                    self.trainer.estimated_stepping_batches),
+            get_cosine_schedule_with_warmup(
+                optimizer, 0, self.trainer.estimated_stepping_batches),
             'interval':
-                'step'
+            'step'
         }
 
         return {'optimizer': optimizer, 'lr_scheduler': scheduler_config}
-        
+
         return optimizer
 
     @staticmethod
@@ -285,16 +290,13 @@ class Rockfish(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         signals, bases, num_blocks, labels, singletons = batch
         targets = (labels > 0.5).int()
-        
+
         bases_mask = None
         if self.bases_mask_task:
             bases, bases_mask, target_bases = self.bases_masking(bases)
 
         mod_logits, mask_logits, signal_code_logits, context_code_logits = self.forward_train(
-            signals,
-            bases,
-            num_blocks,
-            bases_mask=bases_mask)
+            signals, bases, num_blocks, bases_mask=bases_mask)
 
         mod_loss = self.ce_loss(mod_logits, labels, singletons)
 
@@ -371,11 +373,13 @@ class Rockfish(pl.LightningModule):
 def get_trainer_defaults() -> Dict[str, Any]:
     trainer_defaults = {}
 
+    lr_monitor = LearningRateMonitor(logging_interval='step')
+
     model_checkpoint = ModelCheckpoint(monitor='f1-score',
                                        filename='{step}-{f1-score:.5f}',
                                        save_top_k=5,
                                        mode='max')
-    trainer_defaults['callbacks'] = [model_checkpoint]
+    trainer_defaults['callbacks'] = [lr_monitor, model_checkpoint]
 
     wandb = WandbLogger(project='dna-mod-revision',
                         log_model=True,
@@ -394,9 +398,9 @@ class RockfishLightningCLI(LightningCLI):
 
 def cli_main():
     cli = RockfishLightningCLI(Rockfish,
-                         RFDataModule,
-                         save_config_kwargs={"overwrite": True},
-                         trainer_defaults=get_trainer_defaults())
+                               RFDataModule,
+                               save_config_kwargs={"overwrite": True},
+                               trainer_defaults=get_trainer_defaults())
 
 
 if __name__ == '__main__':
