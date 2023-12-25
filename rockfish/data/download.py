@@ -1,14 +1,13 @@
-import gdown
-
-from pathlib import Path
-import sys
 import argparse
-
+import sys
+from pathlib import Path
 from typing import *
 
+import gdown
+
 MODELS = {
-    'base': '1CXWcnKrrv9jJ3XirzZDV3tzW4MZyYj73',
-    'small': '1-MJrnzknj2TIKzKSrT_UNfSooERdGc6Q'
+    'base': '1ajWkA361YrmXbnSbYhlzpJeqq2pG2J8P',
+    'small': '1beWcPQJpO9W85bfFY438ophmzOxIrPdz'
 }
 
 

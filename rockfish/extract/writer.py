@@ -1,15 +1,14 @@
+from pathlib import Path
 import sys
 from collections import OrderedDict
-from pathlib import Path
+
 from typing import List, Set
 
 from rockfish.rf_format import *
-
 from .extract import Example
 
 
 class BinaryWriter:
-
     def __init__(self, path: Path, ref_names: Set[str], seq_len: int) -> None:
         self.path = path
         self.S = seq_len
@@ -25,15 +24,10 @@ class BinaryWriter:
         self.fd.close()
 
     def write_example(self, example: Example) -> bytes:
-        header = RFExampleHeader(example.read_id, self.ref_ids[example.ctg],
+        header = RFExampleHeader(example.read_id, 0,
                                  example.pos, len(example.signal),
-                                 len(example.q_indices)).to_bytes()
-        data = RFExampleData(
-            example.signal,
-            example.q_indices,
-            example.event_length,
-            example.bases,
-        ).to_bytes()
+                                 0).to_bytes()
+        data = RFExampleData(example.signal, np.array([]), example.bases).to_bytes()
 
         return header + data
 

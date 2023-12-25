@@ -26,7 +26,7 @@ def read_offsets(idx_path: str) -> List[int]:
         n_examples = int.from_bytes(f.read(4), byteorder=sys.byteorder)
         start = int.from_bytes(f.read(4), byteorder=sys.byteorder)
 
-        data = np.empty((n_examples + 1,), dtype=int)
+        data = np.empty((n_examples + 1, ), dtype=int)
         data[0] = start
         data[1:] = np.fromfile(f, dtype=np.ushort)
 
@@ -107,12 +107,10 @@ class RFInferenceDataset(IterableDataset):
         self.ref_len = ref_len
         self.block_size = block_size
 
-        self.mapping_encodings = ReferenceMapping(self.ref_len, self.block_size)
+        # self.mapping_encodings = ReferenceMapping(self.ref_len, self.block_size)
 
         self.path = path
         self.fd = None
-        with open(self.path, 'rb') as fd:
-            self.ctgs = RFHeader.parse_header(fd).ctgs
 
         self.offsets = read_offsets(f'{path}.idx')
         self.start = 0 if start_idx is None else start_idx
@@ -131,7 +129,8 @@ class RFInferenceDataset(IterableDataset):
 
         for _ in range(self.start, self.end):
             example = RFExample.from_file(self.fd, self.ref_len)
-            bin = len(example.data.q_indices) // 10 - min_bin_idx
+            bin = (len(example.data.signal) //
+                   self.block_size) // 10 - min_bin_idx
             bins[bin].append(example)
             stored += 1
 
@@ -163,21 +162,14 @@ class RFInferenceDataset(IterableDataset):
                 yield self.example_to_tensor(example)
 
     def example_to_tensor(
-        self, example: RFExample
-    ) -> Tuple[str, str, int, torch.Tensor, torch.Tensor, torch.Tensor,
-               torch.Tensor]:
+            self,
+            example: RFExample) -> Tuple[str, int, torch.Tensor, torch.Tensor]:
         signal = torch.tensor(example.data.signal,
                               dtype=torch.half).unfold(-1, self.block_size,
                                                        self.block_size)
         bases = torch.tensor([ENCODING.get(b, 4) for b in example.data.bases])
-        q_indices = torch.tensor(example.data.q_indices.astype(np.int32))
-        lengths = torch.tensor(example.data.event_lengths.astype(np.int32))
 
-        r_pos_enc = self.mapping_encodings(lengths)
-
-        return example.header.read_id, self.ctgs[
-            example.header.
-            ctg_id], example.header.pos, signal, bases, r_pos_enc, q_indices
+        return example.header.read_id, example.header.pos, signal, bases
 
 
 def collate_fn_train(batch):
@@ -194,16 +186,12 @@ def collate_fn_train(batch):
 
 
 def collate_fn_inference(batch):
-    read_ids, ctgs, positions, signals, bases, ref_mapping, q_indices = zip(
-        *batch)
+    read_ids, positions, signals, bases = zip(*batch)
 
     num_blocks = torch.tensor([len(s) for s in signals])
     signals = pad_sequence(signals, batch_first=True)  # BxMAX_LEN
-    ref_mapping = pad_sequence(ref_mapping, batch_first=True)
-    q_indices = pad_sequence(q_indices, batch_first=True)  # [B,MAX_LEN//5]
 
-    return read_ids, ctgs, positions, signals, torch.stack(
-        bases, 0), ref_mapping, q_indices, num_blocks
+    return read_ids, positions, signals, torch.stack(bases, 0), num_blocks
 
 
 def worker_init_train_fn(worker_id: int) -> None:
@@ -219,7 +207,8 @@ def worker_init_rf_inference_fn(worker_id: int) -> None:
     dataset = worker_info.dataset
 
     total_examples = dataset.end - dataset.start
-    per_worker = int(math.ceil(total_examples / float(worker_info.num_workers)))
+    per_worker = int(math.ceil(total_examples /
+                               float(worker_info.num_workers)))
 
     dataset.start += worker_id * per_worker
     dataset.end = min(dataset.start + per_worker, dataset.end)
