@@ -189,12 +189,12 @@ def inference(args: argparse.Namespace) -> None:
     files = list(get_files(args.input, args.recursive, 'pod5'))
     random.shuffle(files)
 
-    tqdm.write(f'Parsing reference file {args.reference}')
+    '''tqdm.write(f'Parsing reference file {args.reference}')
     aligner = get_aligner(args.reference, args.workers)
 
     tqdm.write('Building reference positions for the given motif.')
     ref_positions = build_reference_idx2(aligner, args.motif, args.idx,
-                                         args.workers)
+                                         args.workers)'''
 
     gpus = parse_gpus(args.gpus) if args.gpus is not None else None
     device = 'cpu' if gpus is None else gpus[0]
@@ -202,6 +202,7 @@ def inference(args: argparse.Namespace) -> None:
     model, block_size = load_model(args.model_path, device, gpus)
     model.eval()
 
+    aligner, ref_positions = None, None
     dataset = Fast5Dataset(files, args.bam_path, args.workers, ref_positions, aligner, args.window,
                            args.mapq_filter, args.unique_aln, args.batch_size,
                            block_size, device)
@@ -247,7 +248,7 @@ def add_inference_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--model_path', type=str, required=True)
     parser.add_argument('--bam_path', type=Path, required=True)
 
-    parser.add_argument('--reference', type=str, required=True)
+    # parser.add_argument('--reference', type=str, required=True)
     parser.add_argument('--motif', type=str, default='CG')
     parser.add_argument('--idx', type=int, default=0)
 
