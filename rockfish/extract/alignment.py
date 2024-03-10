@@ -42,7 +42,7 @@ def align_read(query: str, aligner: mappy.Aligner, buffer: mappy.ThreadBuffer,
         alignment.cigar)
     rpos, qpos = 0, alignment.q_st  # if alignment.strand == 1 else len(query) - alignment.q_en
 
-    ref_to_query = np.empty((ref_len + 1,), dtype=int)
+    ref_to_query = np.empty((ref_len + 1, ), dtype=int)
     for length, op in cigar:
         if op == 0 or op == 7 or op == 8:  # Match or mismatch
             rend = rpos + length

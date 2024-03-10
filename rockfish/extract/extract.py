@@ -1,5 +1,6 @@
 import numpy as np
 import mappy
+from pod5 import ReadRecord
 
 import multiprocessing as mp
 from dataclasses import dataclass
@@ -9,16 +10,18 @@ import re
 from typing import *
 
 from .fast5 import ReadInfo
-from .pod5 import  BamIndex, PodReadInfo
+from .pod5 import BamIndex, PodReadInfo, load_pod5_read
 from .alignment import AlignmentData, AlignmentInfo, align_read
 
 MotifPositions = Dict[str, Tuple[Set[int], Set[int]]]
 
-MIN_BLOCKS_LEN_FACTOR = 0.5
-MAX_BLOCKS_LEN_FACTOR = 5
+MIN_BLOCKS_LEN_FACTOR = 0.1
+MAX_BLOCKS_LEN_FACTOR = 8
 
 import re
+
 REGEX = re.compile('CG', flags=re.I | re.A)
+
 
 @dataclass
 class Example:
@@ -37,7 +40,8 @@ def build_reference_idx(aligner: mappy.Aligner, motif: str,
         sequence = aligner.seq(contig)
 
         fwd_pos = {
-            m.start() + rel_idx for m in re.finditer(motif, sequence, re.I)
+            m.start() + rel_idx
+            for m in re.finditer(motif, sequence, re.I)
         }
 
         rev_comp = mappy.revcomp(sequence)
@@ -47,7 +51,8 @@ def build_reference_idx(aligner: mappy.Aligner, motif: str,
             return seq_len - (i + rel_idx) - 1
 
         rev_pos = {
-            pos_for_rev(m.start()) for m in re.finditer(motif, rev_comp, re.I)
+            pos_for_rev(m.start())
+            for m in re.finditer(motif, rev_comp, re.I)
         }
 
         positions[contig] = (fwd_pos, rev_pos)
@@ -66,7 +71,8 @@ def build_index_for_ctg(sequence: str, motif: str,
         return seq_len - (i + rel_idx) - 1
 
     rev_pos = {
-        pos_for_rev(m.start()) for m in re.finditer(motif, rev_comp, re.I)
+        pos_for_rev(m.start())
+        for m in re.finditer(motif, rev_comp, re.I)
     }
 
     return fwd_pos, rev_pos
@@ -121,7 +127,6 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         return None, None
     query, _ = read_info.get_seq_and_quals()
     example_bases = (2 * window) + 1
-
     '''status, aln_data = align_read(query, aligner, buffer, mapq_filter,
                                   unique_aln, read_info.read_id)
     if aln_data is None:
@@ -141,17 +146,19 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
         sig_start, sig_end = seq_to_sig[win_st], seq_to_sig[win_en]
 
         n_blocks = (sig_end - sig_start) // read_info.block_stride
-        if n_blocks < int(MIN_BLOCKS_LEN_FACTOR * example_bases) or n_blocks > int(MAX_BLOCKS_LEN_FACTOR * example_bases):
+        if n_blocks < int(
+                MIN_BLOCKS_LEN_FACTOR * example_bases) or n_blocks > int(
+                    MAX_BLOCKS_LEN_FACTOR * example_bases):
             continue
-        
         '''move_start = (sig_start - seq_to_sig[0]) // read_info.block_stride
         move_end = (sig_end - seq_to_sig[0]) // read_info.block_stride
         event_lengths = read_info.move_table[move_start:move_end].cumsum() - 1
         assert len(event_lengths) == example_bases'''
 
-        example = Example(read_info.read_id, pos, signal[sig_start:sig_end], query[win_st:win_en], np.zeros(example_bases, dtype=int))
+        example = Example(read_info.read_id, pos, signal[sig_start:sig_end],
+                          query[win_st:win_en],
+                          np.zeros(example_bases, dtype=int))
         examples.append(example)
-
     '''for rel, pos in get_ref_pos(aln_data, ref_positions, window):
         q_start = aln_data.ref_to_query[rel - window]
         sig_start = seq_to_sig[q_start]
@@ -182,14 +189,21 @@ def extract_features(read_info: ReadInfo, ref_positions: MotifPositions,
     return status, examples
 
 
-def extract_pod5_features(read_info: PodReadInfo, bamidx: BamIndex, ref_positions: MotifPositions,
-                     aligner: mappy.Aligner, buffer: mappy.ThreadBuffer,
-                     window: int, mapq_filter: int,
-                     unique_aln: bool) -> Tuple[AlignmentInfo, List[Example]]:
+def extract_pod5_features(
+        read: ReadRecord, bamidx: BamIndex, ref_positions: MotifPositions,
+        aligner: mappy.Aligner, buffer: mappy.ThreadBuffer, window: int,
+        mapq_filter: int,
+        unique_aln: bool) -> Tuple[AlignmentInfo, List[Example]]:
 
-    for bam_data in bamidx.get_alignment(read_info.read_id):
+    for bam_data in bamidx.get_alignment(str(read.read_id)):
+        read_info = load_pod5_read(read)
         read_info.update_from_bam(bam_data)
-        status, examples = extract_features(read_info=read_info, ref_positions=ref_positions, aligner=aligner,
-                                        buffer=buffer, window=window, mapq_filter=mapq_filter,
-                                        unique_aln=unique_aln)
+
+        status, examples = extract_features(read_info=read_info,
+                                            ref_positions=ref_positions,
+                                            aligner=aligner,
+                                            buffer=buffer,
+                                            window=window,
+                                            mapq_filter=mapq_filter,
+                                            unique_aln=unique_aln)
         yield status, examples

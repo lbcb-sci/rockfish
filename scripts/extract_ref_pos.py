@@ -121,7 +121,7 @@ def process_record(motif: str, rel_idx: int, positions: MotifPositions,
 
 
 def bam_read_worker(path, minq, queue, n_workers):
-    with pysam.AlignmentFile(path, mode='rb', check_sq=False) as bam:
+    with pysam.AlignmentFile(path, mode='rb', check_sq=False, threads=16) as bam:
         for record in bam:
             if record.is_secondary or record.is_unmapped or record.is_qcfail or record.is_supplementary:
                 continue
@@ -161,7 +161,7 @@ def main(args):
         else:
             qname, rname, mappings = result
             for rpos, qpos in mappings:
-                print(qname, qpos, rpos, rname)
+                print(qname, qpos, rpos, rname, sep='\t')
             pbar.update()
 
 

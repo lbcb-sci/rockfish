@@ -4,6 +4,7 @@ import sys
 import warnings
 from contextlib import ExitStack
 from pathlib import Path
+import traceback
 from typing import *
 
 import mappy
@@ -18,8 +19,8 @@ from rockfish.extract.main import *
 from rockfish.model.datasets import *
 from rockfish.model.model import Rockfish
 
-HEADER_PROBS = '\t'.join(['read_id', 'ctg', 'pos', 'prob'])
-HEADER_LOGITS = '\t'.join(['read_id', 'ctg', 'pos', 'logit'])
+HEADER_PROBS = '\t'.join(['read_id', 'pos', 'prob'])
+HEADER_LOGITS = '\t'.join(['read_id', 'pos', 'logit'])
 
 
 def parse_gpus(string: str) -> List[int]:
@@ -48,11 +49,13 @@ def load_model(path: str, device: str, gpus: List[int]):
 class ExampleBins:
 
     def __init__(self,
+                 block_size: int,
                  min_len: int,
                  max_len: int,
                  batch_size: int,
                  storage_factor: int = 4,
                  bin_range: int = 10) -> None:
+        self.block_size = block_size
         self.offset = min_len // bin_range
         n_bins = (max_len // bin_range) - self.offset + 1
 
@@ -62,8 +65,11 @@ class ExampleBins:
         self.batch_size = batch_size
         self.max_examples = batch_size * storage_factor
 
+        # print(f'Min: {min_len}, max {max_len}, block size: {self.block_size}')
+
     def add_example(self, example: Example) -> Iterator[Example]:
-        n_bin = len(example.q_indices) // 10 - self.offset
+        n_bin = (len(example.signal) // self.block_size) // 10 - self.offset
+        # print(f'Bin: {n_bin}, signal length: {len}')
         bin = self.bins[n_bin]
 
         bin.append(example)
@@ -98,13 +104,18 @@ class ExampleBins:
 
 class Fast5Dataset(IterableDataset):
 
-    def __init__(self, files: List[Path], ref_positions: MotifPositions,
+    def __init__(self, files: List[Path], bam_path: Path, idx_workers: int, 
+                 ref_positions: MotifPositions,
                  aligner: mappy.Aligner, window: int, mapq_filter: int,
                  unique_aln: bool, batch_size: int, block_size: int,
                  device: str) -> None:
         super().__init__()
 
-        self.files = files
+        self.bam_idx, self.pod5_file_rids_pairs = match_pod5_and_bam(bam_path, files, idx_workers)
+        t = sum([len(p) for _, p in self.pod5_file_rids_pairs])
+        print(f'Total {len(self.pod5_file_rids_pairs)}, {t}')
+
+        # self.files = files
         self.ref_positions = ref_positions
         self.aligner = aligner
         self.window = window
@@ -115,40 +126,36 @@ class Fast5Dataset(IterableDataset):
         self.batch_size = batch_size
         self.device = device
 
-        self.mapping_encodings = ReferenceMapping(self.bases_len, block_size)
+        # self.mapping_encodings = ReferenceMapping(self.bases_len, block_size)
 
     def __iter__(self):
-        bins = ExampleBins(int(self.bases_len * MIN_BLOCKS_LEN_FACTOR),
+        bins = ExampleBins(self.block_size,
+                           int(self.bases_len * MIN_BLOCKS_LEN_FACTOR),
                            int(self.bases_len * MAX_BLOCKS_LEN_FACTOR),
                            self.batch_size)
 
         buffer = None
-        for file in self.files:
-            for read in get_reads(file):
+        for pod5_path, rids in self.pod5_file_rids_pairs:
+            for read in load_signals(pod5_path, rids):
                 try:
-                    read_info = load_read(read)
-                except Exception as e:
-                    print(f'Cannot load read from file {file}.',
-                          file=sys.stderr)
-                    continue
+                    for _, examples in extract_pod5_features(
+                        read, self.bam_idx, self.ref_positions, self.aligner, buffer,
+                        self.window, self.mapq_filter, self.unique_aln):
 
-                try:
-                    _, examples = extract_features(
-                        read_info, self.ref_positions, self.aligner, buffer,
-                        self.window, self.mapq_filter, self.unique_aln)
+                        if examples is None:
+                            continue
+
+                        for example in examples:
+                            batch = bins.add_example(example)
+                            if batch is not None:
+                                yield from (self.example_to_tensor(e) for e in batch)
                 except Exception as e:
+                    print(traceback.format_exc())
+
                     print(
-                        f'Cannot process read {read_info.read_id} from file {file}.',
+                        f'Cannot process read {read.read_id} from file {pod5_path}.',
                         file=sys.stderr)
                     continue
-
-                if examples is None:
-                    continue
-
-                for example in examples:
-                    batch = bins.add_example(example)
-                    if batch is not None:
-                        yield from (self.example_to_tensor(e) for e in batch)
 
         for example in bins.emit_all():
             yield self.example_to_tensor(example)
@@ -162,28 +169,24 @@ class Fast5Dataset(IterableDataset):
             dtype=torch.float if self.device == 'cpu' else torch.half).unfold(
                 -1, self.block_size, self.block_size)
         bases = torch.tensor([ENCODING.get(b, 4) for b in example.bases])
-        q_indices = torch.tensor(example.q_indices.astype(np.int32))
-        lengths = torch.tensor(np.array(example.event_length).astype(np.int32))
 
-        r_pos_enc = self.mapping_encodings(lengths)
-
-        return example.read_id, example.ctg, example.pos, signal, bases, r_pos_enc, q_indices
+        return example.read_id, example.pos, signal, bases
 
 
 def worker_init_fn(worker_id: int) -> None:
     worker_info = torch.utils.data.get_worker_info()
     dataset = worker_info.dataset
 
-    total_files = len(dataset.files)
+    total_files = len(dataset.pod5_file_rids_pairs)
     per_worker = int(math.ceil(total_files / float(worker_info.num_workers)))
 
     start = worker_id * per_worker
     end = min(start + per_worker, total_files)
-    dataset.files = dataset.files[start:end]
+    dataset.pod5_file_rids_pairs = dataset.pod5_file_rids_pairs[start:end]
 
 
 def inference(args: argparse.Namespace) -> None:
-    files = list(get_files(args.input, args.recursive))
+    files = list(get_files(args.input, args.recursive, 'pod5'))
     random.shuffle(files)
 
     tqdm.write(f'Parsing reference file {args.reference}')
@@ -199,7 +202,7 @@ def inference(args: argparse.Namespace) -> None:
     model, block_size = load_model(args.model_path, device, gpus)
     model.eval()
 
-    dataset = Fast5Dataset(files, ref_positions, aligner, args.window,
+    dataset = Fast5Dataset(files, args.bam_path, args.workers, ref_positions, aligner, args.window,
                            args.mapq_filter, args.unique_aln, args.batch_size,
                            block_size, device)
     loader = DataLoader(dataset,
@@ -221,20 +224,18 @@ def inference(args: argparse.Namespace) -> None:
         if gpus is not None:
             manager.enter_context(torch.cuda.amp.autocast())
 
-        for ids, ctgs, positions, signals, bases, r_mappings, q_mappings, n_blocks in loader:
+        for ids, positions, signals, bases, n_blocks in loader:
             signals = signals.to(device)
             bases = bases.to(device)
-            r_mappings = r_mappings.to(device)
-            q_mappings = q_mappings.to(device)
             n_blocks = n_blocks.to(device)
 
-            out = model(signals, r_mappings, q_mappings, bases, n_blocks)
+            out = model(signals, bases, n_blocks)
             if not args.logits:
                 out = out.sigmoid()
             out = out.cpu().numpy()
 
-            for id, ctg, pos, o in zip(ids, ctgs, positions, out):
-                print(id, ctg, pos, o, file=output_file, sep='\t')
+            for id, pos, o in zip(ids, positions, out):
+                print(id, pos, o, file=output_file, sep='\t')
 
             pbar.update(n=len(positions))
 
@@ -244,6 +245,7 @@ def add_inference_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('-r', '--recursive', action='store_true')
 
     parser.add_argument('--model_path', type=str, required=True)
+    parser.add_argument('--bam_path', type=Path, required=True)
 
     parser.add_argument('--reference', type=str, required=True)
     parser.add_argument('--motif', type=str, default='CG')

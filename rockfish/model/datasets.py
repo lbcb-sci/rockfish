@@ -51,12 +51,13 @@ class ReferenceMapping:
 
 class RFTrainDataset(Dataset):
 
-    def __init__(self, path: str, labels: str, ref_len: int,
-                 block_size: int) -> None:
+    def __init__(self, path: str, labels: str, ref_len: int, block_size: int,
+                 mode: str) -> None:
         super(Dataset, self).__init__()
 
         self.ref_len = ref_len
         self.block_size = block_size
+        self.mode = mode
 
         self.path = path
         self.fd = None
@@ -74,7 +75,14 @@ class RFTrainDataset(Dataset):
     def __getitem__(self, idx):
         example = RFExample.from_file(self.fd, self.ref_len, self.offsets[idx])
 
-        signal = torch.tensor(example.data.signal).unfold(
+        signal = example.data.signal
+        if self.mode == 'train':
+            noise = np.random.randn(len(signal)).astype(
+                np.half) * 0.15 * np.std(signal)
+            signal = signal + noise
+        signal = (signal - np.mean(signal)) / np.std(signal)
+
+        signal = torch.tensor(signal).unfold(
             -1, self.block_size, self.block_size)  # Converting to blocks
 
         bases = torch.tensor([ENCODING.get(b, 4) for b in example.data.bases])
@@ -243,9 +251,11 @@ class RFDataModule(pl.LightningDataModule):
     def setup(self, stage: Optional[str] = None) -> None:
         if stage == 'fit':
             self.train_ds = RFTrainDataset(self.train_data, self.train_labels,
-                                           self.ref_len, self.block_size)
+                                           self.ref_len, self.block_size,
+                                           'train')
+
             self.val_ds = RFTrainDataset(self.val_data, self.val_labels,
-                                         self.ref_len, self.block_size)
+                                         self.ref_len, self.block_size, 'val')
 
     def train_dataloader(self):
         return DataLoader(self.train_ds,
