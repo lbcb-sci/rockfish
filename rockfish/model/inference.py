@@ -112,8 +112,6 @@ class Fast5Dataset(IterableDataset):
         super().__init__()
 
         self.bam_idx, self.pod5_file_rids_pairs = match_pod5_and_bam(bam_path, files, idx_workers)
-        t = sum([len(p) for _, p in self.pod5_file_rids_pairs])
-        print(f'Total {len(self.pod5_file_rids_pairs)}, {t}')
 
         # self.files = files
         self.ref_positions = ref_positions

@@ -1,4 +1,5 @@
 import math
+import sys
 from typing import *
 
 import torch
@@ -11,6 +12,10 @@ from torch.nn.init import xavier_uniform_
 from torch.nn.utils.rnn import pad_sequence
 
 # from .mha import RockfishMHA
+
+use_flash_attn = torch.cuda.get_device_capability('cuda') >= (7, 5)
+if not use_flash_attn:
+    print('Warning: Flash attention cannot be used.', file=sys.stderr)
 
 
 class PositionalEncoding(nn.Module):
@@ -187,7 +192,7 @@ class SignalLayer(nn.Module):
         self.self_attn = MHA(embed_dim=embed_dim,
                              num_heads=num_heads,
                              dropout=dropout,
-                             use_flash_attn=True)
+                             use_flash_attn=use_flash_attn)
         self.sa_dropout = nn.Dropout(dropout)
 
         self.ff_norm = nn.LayerNorm(embed_dim)
@@ -228,7 +233,7 @@ class AlignmentLayer(nn.Module):
         self.self_attn = MHA(embed_dim=embed_dim,
                              num_heads=num_heads,
                              dropout=dropout,
-                             use_flash_attn=True)
+                             use_flash_attn=use_flash_attn)
         self.sa_dropout = nn.Dropout(dropout)
 
         self.mha_norm = nn.LayerNorm(embed_dim)
@@ -236,7 +241,7 @@ class AlignmentLayer(nn.Module):
                               num_heads=num_heads,
                               dropout=dropout,
                               cross_attn=True,
-                              use_flash_attn=True)
+                              use_flash_attn=use_flash_attn)
         self.cross_dropout = nn.Dropout(dropout)
 
         self.ff_norm = nn.LayerNorm(embed_dim)
