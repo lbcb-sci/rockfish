@@ -11,9 +11,8 @@ from torch import Tensor
 from torch.nn.init import xavier_uniform_
 from torch.nn.utils.rnn import pad_sequence
 
-# from .mha import RockfishMHA
 
-use_flash_attn = torch.cuda.get_device_capability('cuda') >= (7, 5)
+use_flash_attn = torch.cuda.is_available() and torch.cuda.get_device_capability('cuda') >= (7, 5)
 if not use_flash_attn:
     print('Warning: Flash attention cannot be used.', file=sys.stderr)
 
@@ -198,17 +197,22 @@ class SignalLayer(nn.Module):
         self.ff_norm = nn.LayerNorm(embed_dim)
         self.ff_block = LinearProjection(embed_dim, dim_ff, dropout)
 
-    def self_attn_block(self, signal: Tensor, cu_seqlens: Tensor,
-                        max_seqlen: int) -> Tensor:
+    def self_attn_block(self, 
+                        signal: Tensor, 
+                        cu_seqlens: Optional[Tensor],
+                        max_seqlen: Optional[int],
+                        signal_mask: Optional[Tensor]
+                        ) -> Tensor:
         signal = self.self_attn(signal,
                                 cu_seqlens=cu_seqlens,
-                                max_seqlen=max_seqlen)
+                                max_seqlen=max_seqlen,
+                                key_padding_mask=signal_mask)
         return self.sa_dropout(signal)
 
     def forward(self, signal: Tensor, cu_seqlens: Tensor,
-                max_seqlen: int) -> Tensor:
+                max_seqlen: int, signal_mask: Optional[Tensor]) -> Tensor:
         signal = signal + self.self_attn_block(self.sa_norm(signal),
-                                               cu_seqlens, max_seqlen)
+                                               cu_seqlens, max_seqlen, signal_mask)
         signal = signal + self.ff_block(self.ff_norm(signal))
 
         return signal
@@ -250,14 +254,14 @@ class AlignmentLayer(nn.Module):
     def self_attn_block(
         self,
         bases: Tensor,
-        cu_seqlens: Tensor,
-        max_seqlen: int,
+        cu_seqlens: Optional[Tensor],
+        max_seqlen: Optional[int],
     ) -> Tensor:
         bases = self.self_attn(bases,
                                cu_seqlens=cu_seqlens,
                                max_seqlen=max_seqlen)
         return self.sa_dropout(bases)
-
+    
     def cross_block(
         self,
         bases: Tensor,
@@ -266,13 +270,19 @@ class AlignmentLayer(nn.Module):
         max_seqlen: int,
         cu_seqlens_k: Tensor,
         max_seqlen_k: int,
+        signal_mask: Optional[Tensor]
     ) -> Tensor:
-        bases = self.cross_attn(bases,
-                                x_kv=signal,
-                                cu_seqlens=cu_seqlens,
-                                max_seqlen=max_seqlen,
-                                cu_seqlens_k=cu_seqlens_k,
-                                max_seqlen_k=max_seqlen_k)
+        if use_flash_attn:
+            bases = self.cross_attn(bases,
+                                    x_kv=signal,
+                                    cu_seqlens=cu_seqlens,
+                                    max_seqlen=max_seqlen,
+                                    cu_seqlens_k=cu_seqlens_k,
+                                    max_seqlen_k=max_seqlen_k)
+        else:
+            bases = self.cross_attn(bases,
+                                    x_kv=signal,
+                                    key_padding_mask=signal_mask)
         bases = self.cross_dropout(bases)
 
         return bases
@@ -281,16 +291,17 @@ class AlignmentLayer(nn.Module):
         self,
         bases: Tensor,
         signal: Tensor,
-        cu_seqlens: Tensor,
-        max_seqlen: int,
-        cu_seqlens_k: Tensor,
-        max_seqlen_k: int,
+        cu_seqlens: Optional[Tensor],
+        max_seqlen: Optional[int],
+        cu_seqlens_k: Optional[Tensor],
+        max_seqlen_k: Optional[int],
+        signal_mask: Optional[Tensor]
     ) -> Tensor:
         bases = bases + self.self_attn_block(self.sa_norm(bases), cu_seqlens,
                                              max_seqlen)
         bases = bases + self.cross_block(self.mha_norm(bases), signal,
                                          cu_seqlens, max_seqlen, cu_seqlens_k,
-                                         max_seqlen_k)
+                                         max_seqlen_k, signal_mask)
         bases = bases + self.ff_block(self.ff_norm(bases))
 
         return bases
@@ -319,21 +330,29 @@ class AlignmentDecoder(nn.Module):
                 bases: Tensor,
                 signal: Tensor,
                 signal_mask: Optional[Tensor] = None):
-        signal, _, cu_seqlens_k, max_seqlen_k = unpad_input(
+        if use_flash_attn:
+            signal, _, cu_seqlens_k, max_seqlen_k = unpad_input(
             signal, signal_mask)
+            signal_mask = None
 
-        cu_seqlens = torch.arange(0,
-                                  len(bases) * self.bases_len + 1,
-                                  self.bases_len,
-                                  device=bases.device,
-                                  dtype=torch.int32)
-        max_seqlen = self.bases_len
+            cu_seqlens = torch.arange(0,
+                                      len(bases) * self.bases_len + 1,
+                                      self.bases_len,
+                                      device=bases.device,
+                                      dtype=torch.int32)
+            max_seqlen = self.bases_len
 
-        bases = bases.view(-1, self.embed_dim)
+            bases = bases.view(-1, self.embed_dim)
+        else:
+            cu_seqlens_k, max_seqlen_k = None, None
+            cu_seqlens, max_seqlen = None, None
+
         for layer in self.layers:
             bases = layer(bases, signal, cu_seqlens, max_seqlen, cu_seqlens_k,
-                          max_seqlen_k)
-        bases = bases.view(-1, self.bases_len, self.embed_dim)
+                          max_seqlen_k, signal_mask)
+            
+        if use_flash_attn:
+            bases = bases.view(-1, self.bases_len, self.embed_dim)
 
         return bases
 
@@ -363,13 +382,20 @@ class SignalEncoder(nn.Module):
     def forward(self, signal: Tensor, signal_mask: Optional[Tensor] = None):
         B, S, _ = signal.shape
 
-        signal, indices, cu_seqlens, max_seqlen = unpad_input(
-            signal, signal_mask)
+        if use_flash_attn:
+            signal, indices, cu_seqlens, max_seqlen = unpad_input(
+                signal, signal_mask)
+            
+            signal_mask = None
+        else:
+            cu_seqlens, max_seqlen = None, None
 
         for layer in self.layers:
-            signal = layer(signal, cu_seqlens, max_seqlen)
+            signal = layer(signal, cu_seqlens, max_seqlen, signal_mask)
 
-        signal = pad_input(signal, indices, B, S)
+        if use_flash_attn:
+            signal = pad_input(signal, indices, B, S)
+
         return signal
 
     def _reset_parameters(self):
