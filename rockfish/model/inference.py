@@ -35,13 +35,14 @@ def load_model(path: str, device: str, gpus: List[int]):
     with warnings.catch_warnings():
         model = Rockfish.load_from_checkpoint(path,
                                               strict=False,
-                                              track_metrics=False)
+                                              track_metrics=False,
+                                              map_location=device)
 
     block_size = model.block_size
 
     if gpus is not None and len(gpus) > 1:
         model = DataParallel(model, gpus)
-    model = model.to(device)
+    # model = model.to(device)
 
     return model, block_size
 
@@ -195,7 +196,7 @@ def inference(args: argparse.Namespace) -> None:
                                          args.workers)'''
 
     gpus = parse_gpus(args.gpus) if args.gpus is not None else None
-    device = 'cpu' if gpus is None else gpus[0]
+    device = 'cpu' if gpus is None else f'cuda:{gpus[0]}'
 
     model, block_size = load_model(args.model_path, device, gpus)
     model.eval()
