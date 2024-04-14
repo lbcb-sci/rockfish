@@ -1,5 +1,5 @@
 import os
-os.environ['POLARS_MAX_THREADS'] = str(min(os.cpu_count(), 16))
+os.environ['POLARS_MAX_THREADS'] = str(min(os.cpu_count(), 8))
 
 import polars as pl
 from tqdm import tqdm, trange
@@ -14,6 +14,7 @@ from typing import *
 
 
 LABEL_GROUP = pl.when(pl.col('label') > 0.5).then(1).otherwise(0).cast(pl.UInt8)
+RF_EXTRACT_DTYPE = np.dtype([('read_id', 'U36'), ('read_pos', 'u4'), ('fpos', 'u8')])
 
 
 def parse_bedgraph(path: Path,
@@ -45,32 +46,66 @@ def parse_mappings(path: Path) -> pl.LazyFrame:
     return df
 
 
-def rf_extract_info(path: Path) -> pl.LazyFrame:
+def rf_extract_info(path: Path, seq_len: int=31) -> pl.LazyFrame:
     with path.open('rb') as f:
         header = RFHeader.parse_header(f)
 
-        examples = []
-        for _ in trange(10_000_000):
+        examples = np.empty(header.n_examples, RF_EXTRACT_DTYPE)
+        for i in trange(header.n_examples):
             fpos = f.tell()
-            example = RFExample.from_file(f, 31)
+            example = RFExample.from_file(f, seq_len)
 
             read_id = example.header.read_id
+            if len(read_id) > 36:
+                raise ValueError(f'{read_id} is longer than 36 characters.')
+
             read_pos = example.header.pos
 
-            examples.append((read_id, read_pos, fpos))
+            examples[i] = (read_id, read_pos, fpos)
 
-    df = pl.LazyFrame(examples, 
-                      schema={'read_id': pl.Utf8, 'read_pos': pl.UInt32, 'fpos': pl.UInt64})
+    df = pl.LazyFrame(examples)
     return df
 
+
+def emit_examples(df: pl.LazyFrame, 
+                  rf: Path, 
+                  out_rf: Path, 
+                  out_labels: Path, 
+                  seq_len: int=31) -> int:
+    with rf.open('rb') as src, out_rf.open('wb') as f_rf:
+        labels = []
+
+        df = df.select(['fpos', 'label']).collect()
+
+        header = RFHeader.parse_header(src)
+        header.n_examples = len(df)
+        f_rf.write(header.to_bytes())
+
+        for fpos, label in tqdm(df.iter_rows(), total=len(df)):
+            src.seek(fpos)
+            example = RFExample.from_file(src, seq_len)
+            
+            example = example.header.to_bytes() + example.data.to_bytes()
+            f_rf.write(example)
+
+            labels.append(label)
+
+        labels = np.array(labels, dtype=np.half)
+        with out_labels.open('wb') as out:
+            out.write(labels.tobytes())
+
+        return len(df)
 
 def main(args: argparse.Namespace):
     pl.enable_string_cache()
 
     bedgraph = parse_bedgraph(args.bedgraph, args.min_cov, args.include_ctgs, args.exclude_ctgs)
     mappings = parse_mappings(args.mappings)
-    rf_data = rf_extract_info(args.rf)
 
+    tqdm.write('Extracting data information from rf file...')
+    rf_data = rf_extract_info(args.rf, args.seq_len)
+
+    tqdm.write('Mapping examples to labels...')
     df = bedgraph.join(mappings, on=['ctg', 'ref_pos'], how='inner') \
                  .join(rf_data, on=['read_id', 'read_pos'], how='inner')
 
@@ -91,9 +126,12 @@ def main(args: argparse.Namespace):
         df = df.filter(
             pl.int_range(0, pl.count()).shuffle(seed=args.seed).over(LABEL_GROUP) < n_per_class
         )
-        
-    for row in df.select(['fpos', 'label']).collect().iter_rows():
-        print(row)
+    
+    tqdm.write('Writing data and labels...')
+    total = emit_examples(df, args.rf, args.output_rf, args.output_labels, args.seq_len)
+
+    tqdm.write(f'{total} examples written.')
+    
 
 def get_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -113,6 +151,11 @@ def get_arguments() -> argparse.Namespace:
     parser.add_argument('--n_per_class', type=int)
 
     parser.add_argument('--seed', type=int)
+
+    parser.add_argument('--seq_len', type=int, default=31)
+
+    parser.add_argument('--output_rf', type=Path, required=True)
+    parser.add_argument('--output_labels', type=Path, required=True)
 
     return parser.parse_args()
 

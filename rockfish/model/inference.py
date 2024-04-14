@@ -33,16 +33,21 @@ def parse_gpus(string: str) -> List[int]:
 
 def load_model(path: str, device: str, gpus: List[int]):
     with warnings.catch_warnings():
-        model = Rockfish.load_from_checkpoint(path,
+        '''model = Rockfish.load_from_checkpoint(path,
                                               strict=False,
                                               track_metrics=False,
-                                              map_location=device)
+                                              map_location=device)'''
+        model_data = torch.load(path, map_location='cpu')
+        model_data['hyper_parameters']['track_metrics'] = False
+
+        model = Rockfish(**model_data['hyper_parameters'])
+        model.load_state_dict(model_data['state_dict'])
+        model = model.to(device)
 
     block_size = model.block_size
 
     if gpus is not None and len(gpus) > 1:
         model = DataParallel(model, gpus)
-    # model = model.to(device)
 
     return model, block_size
 
