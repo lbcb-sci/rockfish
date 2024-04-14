@@ -1,5 +1,7 @@
 # Rockfish
 
+## Update: R10.4.1 code can be found [here](https://github.com/lbcb-sci/rockfish/tree/r10.4.1) (branch r10.4.1).
+
 Rockfish is the deep learning based tool for detecting 5mC DNA base modifications.
 
 **Find the small example [here](#Example).**
