@@ -2,14 +2,12 @@
 
 Rockfish is the deep learning based tool for detecting 5mC DNA base modifications.
 
-**Find the small example [here](#Example).**
-
 ## Requirements
 
 * Linux (tested on Ubuntu 20.04)
-* ONT Guppy >= 5 (sup model; tested on 5.0.14 - [download](https://cdn.oxfordnanoportal.com/software/analysis/ont-guppy-cpu_5.0.14_linux64.tar.gz))
+* ONT Dorado (sup model; tested on v0.5.0 - [download](https://cdn.oxfordnanoportal.com/software/analysis/dorado-0.8.3-linux-x64.tar.gz))
 * Python >= 3.9
-* CUDA (for GPU inference; tested on 11.3)
+* CUDA (for GPU inference; tested on 11.8)
 
 ### Python Requirements
 Python requirements can be found in [setup.cfg](setup.cfg)
@@ -28,15 +26,23 @@ Python requirements can be found in [setup.cfg](setup.cfg)
 
 1. Clone the repository
    ```shell
-   git clone https://github.com/lbcb-sci/rockfish.git rockfish && cd rockfish
+   git clone -b r10.4.1 https://github.com/lbcb-sci/rockfish.git --single-branch rockfish && cd rockfish
    ```
 
 2. Run installation
    ```shell
-   pip install --extra-index-url https://download.pytorch.org/whl/cu113 .
+   pip install --extra-index-url https://download.pytorch.org/whl/cu118 .
    ```
-   Note: "cu113" installs PyTorch for CUDA 11.3. If you want to install PyTorch for other CUDA version, replace "cu113" with appropriate version (e.g. for CUDA 10.2 "cu102"). For CPU version replace "cu113" with "cpu".
+   Note: "cu113" installs PyTorch for CUDA 11.8. If you want to install PyTorch for other CUDA version, replace "cu118" with appropriate version (e.g. for CUDA 10.2 "cu102"). For CPU version replace "cu118" with "cpu".
 
+   #### Install Flash Attention (Optional)
+   ```shell
+   pip install flash-attn --no-build-isolation
+   ```
+   
+   Installing [Flash Attention](https://github.com/Dao-AILab/flash-attention) can significantly speed up inference by optimizing attention mechanisms, reducing memory usage, and increasing efficiency without compromising accuracy.
+
+   
    Installation should take a few minutes on a desktop computer with reasonable network bandwidth.
 
 3. Download models
@@ -48,15 +54,15 @@ Python requirements can be found in [setup.cfg](setup.cfg)
 
 ## Inference
 
-1. Guppy basecalling
+1. Dorado    basecalling
    ```shell
-   guppy_basecaller -i <fast5_folder> -r -s <save_folder> --config <config_file> --fast5_out --device <cpu_or_gpus>
+   dorado basecaller -x <devices> -r --emit-moves <model> <pod5_files> > basecalls.bam
    ```
-   Note: ```--fast5_out``` will output fast5 files with fastq and move_table groups needed for inference. This parameter is mandatory.
+   Note: ```--emit-moves``` will output move table field for each entry in bam file. Move table is needed for inference. Any super-accurate model with the given data sampling frequency could be used for basecalling.
 
 2. Run inference
    ```shell
-   rockfish inference -i <saved_fast5_files> --reference <reference_path> --model_path <model_path> -r -t <n_workers> -b <batch_size> -d <devices>
+   rockfish inference -i <pod5_files> --bam_path <bam_path> --model_path <model_path> -r -t <n_workers> -b <batch_size> -d <devices>
    ```
    * Number of workers ```-t``` sets number of processes for generating the data.
    * Batch size ```-b``` is an optional parameter with default value of $4096$. However, for some GPUS (like V100 or A100 with 32GB/42 GB VRAM), it's appropriate to set it to a higher value (e.g. $n_{gpu} \times 8192$ or $n_{gpu} \times 16384$ for base model).
@@ -67,25 +73,15 @@ Python requirements can be found in [setup.cfg](setup.cfg)
      * 2 GPUs (3rd and 4th GPU): ```-d 2,3```
 
 ## Models
-| Model | Encoder layers | Decoder layers | Features | Feedforward | Guppy config              |
+| Model | Encoder layers | Decoder layers | Features | Feedforward | Dorado model              |
 |-------|----------------|----------------|----------|-------------|---------------------------|
-| Base  | 12             | 12             | 384      | 2048        | dna_r9.4.1_450bps_sup.cfg |
-| Small | 6              | 6              | 128      | 1024        | dna_r9.4.1_450bps_sup.cfg |
+| 5kHz  | 12             | 12             | 256      | 2048        | $\geq$ dna_r10.4.1_e8.2_400bps_sup@v4.2.0 |
 
-## Example
-Run the example script on 1000 pre-basecalled (Guppy 5.0.14. sup) fast5 files (sampled from Nanopolish [data](https://nanopolish.readthedocs.io/en/latest/quickstart_call_methylation.html)):
-```shell
-GPUS=<devices> ./scripts/example.sh
-```
-Note: Use GPUS var to set GPUs for the inference. Omit GPUS if the inference is run on CPU.
-
+## Output
 Result of the inference is ***predictions.tsv*** file. It is tab-delimited text file with four fileds:
   1. Read-id
-  2. Contig name
-  3. Position in the contig
-  4. 5mC probability 
-
-Note: The predictions can have a slightly different order compared to the predictions in the ***expected.tsv*** file due to multiprocessing. The running time should be about 5 minutes for CPU mode. GPU should be significantly faster.
+  2. Position in the read
+  3. 5mC probability (use `-l` flag to output logits instead of probabilities)
 
 
 ## Acknowledgement

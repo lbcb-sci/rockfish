@@ -12,9 +12,12 @@ import torch
 from torch.nn import DataParallel
 from torch.utils.data import DataLoader, IterableDataset
 
-from rockfish.extract.extract import (MAX_BLOCKS_LEN_FACTOR,
-                                      MIN_BLOCKS_LEN_FACTOR, Example,
-                                      build_reference_idx2)
+from rockfish.extract.extract import (
+    MAX_BLOCKS_LEN_FACTOR,
+    MIN_BLOCKS_LEN_FACTOR,
+    Example,
+    build_reference_idx2,
+)
 from rockfish.extract.main import *
 from rockfish.model.datasets import *
 from rockfish.model.model import Rockfish
@@ -33,10 +36,10 @@ def parse_gpus(string: str) -> List[int]:
 
 def load_model(path: str, device: str, gpus: List[int]):
     with warnings.catch_warnings():
-        '''model = Rockfish.load_from_checkpoint(path,
+        """model = Rockfish.load_from_checkpoint(path,
                                               strict=False,
                                               track_metrics=False,
-                                              map_location=device)'''
+                                              map_location=device)"""
         model_data = torch.load(path, map_location='cpu')
         model_data['hyper_parameters']['track_metrics'] = False
 
@@ -53,14 +56,15 @@ def load_model(path: str, device: str, gpus: List[int]):
 
 
 class ExampleBins:
-
-    def __init__(self,
-                 block_size: int,
-                 min_len: int,
-                 max_len: int,
-                 batch_size: int,
-                 storage_factor: int = 4,
-                 bin_range: int = 10) -> None:
+    def __init__(
+        self,
+        block_size: int,
+        min_len: int,
+        max_len: int,
+        batch_size: int,
+        storage_factor: int = 4,
+        bin_range: int = 10,
+    ) -> None:
         self.block_size = block_size
         self.offset = min_len // bin_range
         n_bins = (max_len // bin_range) - self.offset + 1
@@ -109,15 +113,25 @@ class ExampleBins:
 
 
 class Fast5Dataset(IterableDataset):
-
-    def __init__(self, files: List[Path], bam_path: Path, idx_workers: int, 
-                 ref_positions: MotifPositions,
-                 aligner: mappy.Aligner, window: int, mapq_filter: int,
-                 unique_aln: bool, batch_size: int, block_size: int,
-                 device: str) -> None:
+    def __init__(
+        self,
+        files: List[Path],
+        bam_path: Path,
+        idx_workers: int,
+        ref_positions: MotifPositions,
+        aligner: mappy.Aligner,
+        window: int,
+        mapq_filter: int,
+        unique_aln: bool,
+        batch_size: int,
+        block_size: int,
+        device: str,
+    ) -> None:
         super().__init__()
 
-        self.bam_idx, self.pod5_file_rids_pairs = match_pod5_and_bam(bam_path, files, idx_workers)
+        self.bam_idx, self.pod5_file_rids_pairs = match_pod5_and_bam(
+            bam_path, files, idx_workers
+        )
 
         # self.files = files
         self.ref_positions = ref_positions
@@ -133,19 +147,27 @@ class Fast5Dataset(IterableDataset):
         # self.mapping_encodings = ReferenceMapping(self.bases_len, block_size)
 
     def __iter__(self):
-        bins = ExampleBins(self.block_size,
-                           int(self.bases_len * MIN_BLOCKS_LEN_FACTOR),
-                           int(self.bases_len * MAX_BLOCKS_LEN_FACTOR),
-                           self.batch_size)
+        bins = ExampleBins(
+            self.block_size,
+            int(self.bases_len * MIN_BLOCKS_LEN_FACTOR),
+            int(self.bases_len * MAX_BLOCKS_LEN_FACTOR),
+            self.batch_size,
+        )
 
         buffer = None
         for pod5_path, rids in self.pod5_file_rids_pairs:
             for read in load_signals(pod5_path, rids):
                 try:
                     for _, examples in extract_pod5_features(
-                        read, self.bam_idx, self.ref_positions, self.aligner, buffer,
-                        self.window, self.mapq_filter, self.unique_aln):
-
+                        read,
+                        self.bam_idx,
+                        self.ref_positions,
+                        self.aligner,
+                        buffer,
+                        self.window,
+                        self.mapq_filter,
+                        self.unique_aln,
+                    ):
                         if examples is None:
                             continue
 
@@ -158,7 +180,8 @@ class Fast5Dataset(IterableDataset):
 
                     print(
                         f'Cannot process read {read.read_id} from file {pod5_path}.',
-                        file=sys.stderr)
+                        file=sys.stderr,
+                    )
                     continue
 
         for example in bins.emit_all():
@@ -166,12 +189,10 @@ class Fast5Dataset(IterableDataset):
 
     def example_to_tensor(
         self, example: Example
-    ) -> Tuple[str, str, int, torch.Tensor, torch.Tensor, torch.Tensor,
-               torch.Tensor]:
+    ) -> Tuple[str, str, int, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         signal = torch.tensor(
-            example.signal,
-            dtype=torch.float if self.device == 'cpu' else torch.half).unfold(
-                -1, self.block_size, self.block_size)
+            example.signal, dtype=torch.float if self.device == 'cpu' else torch.half
+        ).unfold(-1, self.block_size, self.block_size)
         bases = torch.tensor([ENCODING.get(b, 4) for b in example.bases])
 
         return example.read_id, example.pos, signal, bases
@@ -193,13 +214,6 @@ def inference(args: argparse.Namespace) -> None:
     files = list(get_files(args.input, args.recursive, 'pod5'))
     random.shuffle(files)
 
-    '''tqdm.write(f'Parsing reference file {args.reference}')
-    aligner = get_aligner(args.reference, args.workers)
-
-    tqdm.write('Building reference positions for the given motif.')
-    ref_positions = build_reference_idx2(aligner, args.motif, args.idx,
-                                         args.workers)'''
-
     gpus = parse_gpus(args.gpus) if args.gpus is not None else None
     device = 'cpu' if gpus is None else f'cuda:{gpus[0]}'
 
@@ -207,15 +221,27 @@ def inference(args: argparse.Namespace) -> None:
     model.eval()
 
     aligner, ref_positions = None, None
-    dataset = Fast5Dataset(files, args.bam_path, args.workers, ref_positions, aligner, args.window,
-                           args.mapq_filter, args.unique_aln, args.batch_size,
-                           block_size, device)
-    loader = DataLoader(dataset,
-                        batch_size=args.batch_size,
-                        num_workers=args.workers,
-                        collate_fn=collate_fn_inference,
-                        worker_init_fn=worker_init_fn,
-                        pin_memory=True)
+    dataset = Fast5Dataset(
+        files,
+        args.bam_path,
+        args.workers,
+        ref_positions,
+        aligner,
+        args.window,
+        args.mapq_filter,
+        args.unique_aln,
+        args.batch_size,
+        block_size,
+        device,
+    )
+    loader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        num_workers=args.workers,
+        collate_fn=collate_fn_inference,
+        worker_init_fn=worker_init_fn,
+        pin_memory=True,
+    )
 
     with ExitStack() as manager:
         output_file = manager.enter_context(open(args.output, 'w'))
@@ -227,7 +253,15 @@ def inference(args: argparse.Namespace) -> None:
         pbar = manager.enter_context(tqdm())
 
         if gpus is not None:
-            manager.enter_context(torch.cuda.amp.autocast())
+            use_bfloat16 = (
+                torch.cuda.is_available()
+                and torch.cuda.get_device_capability(0)[0] >= 8
+            )
+            manager.enter_context(
+                torch.amp.autocast(
+                    'cuda', dtype=torch.bfloat16 if use_bfloat16 else torch.float16
+                )
+            )
 
         for ids, positions, signals, bases, n_blocks in loader:
             signals = signals.to(device)
@@ -237,7 +271,7 @@ def inference(args: argparse.Namespace) -> None:
             out = model(signals, bases, n_blocks)
             if not args.logits:
                 out = out.sigmoid()
-            out = out.cpu().numpy()
+            out = out.float().cpu().numpy()
 
             for id, pos, o in zip(ids, positions, out):
                 print(id, pos, o, file=output_file, sep='\t')
