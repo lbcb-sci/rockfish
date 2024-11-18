@@ -40,9 +40,9 @@ Python requirements can be found in [setup.cfg](setup.cfg)
    Installation should take a few minutes on a desktop computer with reasonable network bandwidth.
 
 3. Download models
-   Available models: ***base***, ***small*** (or both with ***all***)
+   Available models: ***5kHz***
    ```shell
-   rockfish download -m {all, base, small} -s <save_path>
+   rockfish download -m {all, 5kHz} -s <save_path>
    ```
 
 
