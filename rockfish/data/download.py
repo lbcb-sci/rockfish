@@ -6,8 +6,7 @@ from typing import *
 import gdown
 
 MODELS = {
-    'base': '1ajWkA361YrmXbnSbYhlzpJeqq2pG2J8P',
-    'small': '1beWcPQJpO9W85bfFY438ophmzOxIrPdz'
+    '5kHz': '1yD7zAq58uj2_lRb53Wu6TT4tt1hAw4sj',
 }
 
 
